@@ -1,0 +1,1040 @@
+#!/usr/bin/env python3
+"""yt2md: merge YouTube channel/playlist/video subtitles into a single .md file.
+Usage:
+  python3 yt2md.py -o notes.md "<playlist_url>" "<video_url>" ...
+  python3 yt2md.py -o channel.md --max 50 --lang tr,en "https://www.youtube.com/@channel/videos"
+  yt                        # guided interactive mode
+  yt setup                  # personalize defaults (folder, layout, ...)
+  python3 yt2md.py status [dir]   # progress table of saved collections
+  python3 yt2md.py --dry-run "<playlist_url>"  # preview only, no download
+Input: channel / playlist / single video URLs. Output: one Markdown file to feed NotebookLM.
+Requires: pip install yt-dlp (no ffmpeg needed)
+"""
+import argparse
+import datetime
+import html
+import json
+import os
+import random
+import re
+import shutil
+import sys
+import time
+import urllib.request
+
+from yt_dlp import YoutubeDL
+
+TAG_RE = re.compile(r"<[^>]+>")
+ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+UI_ON = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _len(s):
+    return len(ANSI_RE.sub("", s))
+
+
+def _pad(s, w):
+    return s + " " * max(0, w - _len(s))
+
+
+def _c(code, s):
+    return f"\033[{code}m{s}\033[0m" if UI_ON else s
+
+
+def bold(s):
+    return _c("1", s)
+
+
+def green(s):
+    return _c("32", s)
+
+
+def yellow(s):
+    return _c("33", s)
+
+
+def red(s):
+    return _c("31", s)
+
+
+def dim(s):
+    return _c("2", s)
+
+
+def cyan(s):
+    return _c("36", s)
+
+
+def panel(title, lines):
+    rows = [title] + list(lines)
+    w = max(_len(l) for l in rows)
+    edge = "─" * (w + 2)
+    out = [f"┌{edge}┐", f"│ {_pad(bold(title), w)} │", f"├{edge}┤"]
+    out += [f"│ {_pad(l, w)} │" for l in lines]
+    out.append(f"└{edge}┘")
+    return "\n".join(out)
+
+
+def table(headers, rows):
+    widths = [_len(h) for h in headers]
+    for r in rows:
+        for j, c in enumerate(r):
+            widths[j] = max(widths[j], _len(str(c)))
+    sep = "─┼─".join("─" * w for w in widths)
+    head = " │ ".join(_pad(bold(h), w) for h, w in zip(headers, widths))
+    out = [head, sep]
+    for r in rows:
+        out.append(" │ ".join(_pad(str(c), w) for c, w in zip(r, widths)))
+    return "\n".join(out)
+
+
+def bar(frac, width=24):
+    frac = max(0.0, min(1.0, frac))
+    fill = int(frac * width)
+    return f"[{'█' * fill}{'░' * (width - fill)}] {frac * 100:4.0f}%"
+
+
+def _term_width():
+    try:
+        return max(40, shutil.get_terminal_size().columns)
+    except Exception:
+        return 80
+
+
+def _short(s, w):
+    s = str(s)
+    return s if len(s) <= w else s[: max(0, w - 1)] + "…"
+
+
+def _render_dash(done_n, todo_n, title, ok_n, skip_n, words, t0, status=""):
+    """Pure: build the 3 dashboard lines (testable without a terminal)."""
+    w = _term_width()
+    el = (time.time() - t0) / 60
+    frac = done_n / todo_n if todo_n else 0
+    l1 = _short(f"{bar(frac)} {done_n}/{todo_n} · {words} words · {el:.0f} min", w)
+    l2 = _short(f"▶ {title}", w)
+    l3 = _short(f"ok {ok_n} · skipped {skip_n}" + (f" · {status}" if status else ""), w)
+    return [l1, l2, l3]
+
+
+_dash_lines = 0  # lines currently drawn (0 = nothing on screen yet)
+
+
+_VERBOSE = False
+
+
+def dash_update(done_n, todo_n, title, ok_n, skip_n, words, t0, status=""):
+    """Redraw the single in-place dashboard (TTY) or plain lines (logs)."""
+    global _dash_lines
+    if _VERBOSE:
+        el = (time.time() - t0) / 60
+        extra = f" · {status}" if status else ""
+        print(f"{done_n}/{todo_n} videos · {words} words · {el:.0f} min{extra}", flush=True)
+        return
+    if not UI_ON or todo_n <= 0:
+        if todo_n > 0 and (done_n % 10 == 0 or done_n >= todo_n):
+            print(f"{done_n}/{todo_n} videos · {words} words", flush=True)
+        return
+    lines = _render_dash(done_n, todo_n, title, ok_n, skip_n, words, t0, status)
+    if _dash_lines:
+        sys.stdout.write(f"\x1b[{_dash_lines}A")
+    for l in lines:
+        sys.stdout.write("\r\x1b[K" + l + "\n")
+    sys.stdout.flush()
+    _dash_lines = len(lines)
+
+
+def log(msg):
+    """Log line that cleanly breaks the live dashboard."""
+    global _dash_lines
+    if _dash_lines and UI_ON:
+        sys.stdout.write("\n")
+        _dash_lines = 0
+    print(msg, flush=True)
+
+
+def dash_end():
+    global _dash_lines
+    _dash_lines = 0
+
+
+def _to_secs(t):
+    try:
+        p = t.strip().split(":")
+        if len(p) == 3:
+            return int(p[0]) * 3600 + int(p[1]) * 60 + float(p[2])
+        return int(p[0]) * 60 + float(p[1])
+    except (ValueError, IndexError, AttributeError):
+        return 0.0
+
+
+def _fmt_ts(s):
+    s = int(s)
+    h, m = s // 3600, s % 3600 // 60
+    return f"{h}:{m:02d}:{s % 60:02d}" if h else f"{m:02d}:{s % 60:02d}"
+
+
+def vtt_to_text(vtt: str, ts: bool = False) -> str:
+    lines = []  # (start_secs, text)
+    start = 0.0
+    for block in vtt.splitlines():
+        s = block.strip()
+        if not s or s == "WEBVTT" or s.startswith("NOTE") or s.startswith("STYLE") or s.startswith("REGION"):
+            continue
+        if "-->" in s:
+            start = _to_secs(s.split("-->")[0])
+            continue
+        if s.isdigit():
+            continue
+        s = TAG_RE.sub("", s)
+        s = html.unescape(s).replace(" ", " ").strip()
+        if s and (not lines or lines[-1][1] != s):  # drop back-to-back duplicates from auto captions
+            lines.append((start, s))
+    # join into paragraphs of ~20 lines so the flow stays readable
+    paras, buf = [], []
+    for i, (st, ln) in enumerate(lines, 1):
+        buf.append((st, ln))
+        if i % 20 == 0:
+            paras.append(buf)
+            buf = []
+    if buf:
+        paras.append(buf)
+    out = []
+    for p in paras:
+        body = " ".join(t for _, t in p)
+        out.append(f"[{_fmt_ts(p[0][0])}] {body}" if ts else body)
+    return "\n\n".join(out)
+
+
+def _self_test():
+    vtt = "WEBVTT\n\n00:00.000 --> 00:01.000\nmerhaba <b>dünya</b>\n\n00:01.000 --> 00:02.000\nmerhaba <b>dünya</b>\n"
+    assert vtt_to_text(vtt) == "merhaba dünya", vtt_to_text(vtt)
+    assert vtt_to_text("WEBVTT\n\n00:01.500 --> 00:03.000\nhello\n", ts=True) == "[00:01] hello"
+    class E(Exception):
+        code = 429
+    assert _is_throttle(E()) and not _is_throttle(ValueError())
+    assert slug("PickY Audio!") == "picky-audio.md"
+    assert _merge(dict(DEFAULTS), {"defaults": {"lang": "en"}, "profiles": {"p": {"lang": "de"}}},
+                  "p", {"chunk": 5}, {"YT2MD_LANG": "fr"}) == {**DEFAULTS, "lang": "fr", "chunk": 5}
+    assert _merge(dict(DEFAULTS), {"defaults": {}, "profiles": {"p": {"lang": "de"}}},
+                  "p", {}, {})["lang"] == "de"
+    assert sanitize_filename("a<b>c:.md") == "a-b-c-.md"
+    assert sanitize_filename("CON") == "_CON"
+    assert len(sanitize_filename("x" * 300).encode()) <= 200
+    assert render_template("{channel}/{title} [{id}]", {"channel": "C", "title": "T", "id": "ID1"}) == "C/T [ID1].md"
+    assert render_template("{nope}/x", {"a": "b"}) == "x.md"
+    assert _unique_path("a/b.md", "ID1", {"a/b.md"}) == "a/b_ID1.md"
+    assert "50%" in bar(0.5) and bar(2.0).startswith("[█")
+    assert "Name" in table(["Name", "Val"], [["a", "1"]])
+    assert "yt2md" in panel("yt2md", ["x"])
+    assert YT_RE.search("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert not YT_RE.search("https://example.com/foo")
+    d = _render_dash(1, 2, "hello world, this title is quite long", 1, 0, 10, time.time())
+    assert len(d) == 3 and "50%" in d[0] and "hello" in d[1] and "ok 1" in d[2]
+    log("test-line")
+    dash_update(1, 1, "t", 1, 0, 5, time.time())
+    dash_end()
+    info = {"subtitles": {"en": [{"url": "http://x/v?lang=en&fmt=vtt", "ext": "vtt"}]},
+            "automatic_captions": {"tr": [{"url": "http://x/?tlang=tr", "ext": "vtt"}]}}
+    assert pick_sub(info, ["tr", "en"])[0] == "en"  # translated tracks must lose to originals
+    print("self-test ok")
+
+
+def _flatten(ydl, info, depth=0):
+    """Channel -> tabs (Videos/Shorts/Live) -> videos: flatten up to two levels."""
+    entries = info.get("entries")
+    if info.get("_type") not in ("playlist", "multi_video", "compat_batch") or not entries:
+        vid = info.get("id") or ""
+        if len(vid) == 11:  # video IDs are 11 chars; channels (UC..) / playlists (PL..) are not
+            return [{"id": vid, "title": info.get("title") or vid,
+                     "channel": info.get("channel") or info.get("uploader"),
+                     "url": f"https://www.youtube.com/watch?v={vid}"}]
+        return []
+    out = []
+    for e in entries:
+        if e is None:
+            continue
+        if e.get("entries"):
+            out.extend(_flatten(ydl, e, depth + 1))
+        elif e.get("ie_key") == "Youtube" or len(e.get("id", "")) == 11:
+            vid = e.get("id")
+            out.append({"id": vid, "title": e.get("title") or vid,
+                        "channel": e.get("channel") or e.get("uploader"),
+                        "url": f"https://www.youtube.com/watch?v={vid}"})
+        elif depth < 2 and e.get("url"):
+            try:
+                sub = ydl.extract_info(e["url"], download=False)
+            except Exception:
+                continue
+            if sub:
+                out.extend(_flatten(ydl, sub, depth + 1))
+    return out
+
+
+def expand(urls, max_n):
+    ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 20}
+    out, hint = [], None
+    with YoutubeDL(ydl_opts) as ydl:
+        for u in urls:
+            try:
+                info = ydl.extract_info(u, download=False)
+            except Exception as e:
+                print(f"! could not list {u}: {e}", file=sys.stderr)
+                continue
+            if not info:
+                continue
+            if hint is None and len(urls) == 1 and info.get("title"):
+                hint = info.get("title")
+            out.extend(_flatten(ydl, info))
+            if len(out) >= max_n:
+                break
+    # dedupe in case the same video came from two lists
+    seen, uniq = set(), []
+    for v in out:
+        if v["id"] not in seen:
+            seen.add(v["id"])
+            uniq.append(v)
+    return uniq[:max_n], hint
+
+
+def pick_sub(info, langs):
+    # ponytail: original tracks only; tlang translations are the most 429-prone kind
+    subs, autos = info.get("subtitles") or {}, info.get("automatic_captions") or {}
+    for pool in (subs, autos):
+        for lg in langs:
+            if lg in pool:
+                fmts = [f for f in pool[lg] if "tlang=" not in (f.get("url") or "")]
+                if fmts:
+                    return lg, fmts, pool is autos
+    return None, None, False
+
+
+def fetch_vtt(formats):
+    want = [f for f in formats if f.get("ext") == "vtt"] or formats
+    # ponytail: take the first vtt, trying every format is waste
+    url = want[0]["url"]
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return r.read().decode("utf-8", errors="ignore")
+
+
+def _is_throttle(e):
+    return getattr(e, "code", None) in (429, 500, 502, 503)
+
+
+def _countdown(secs, label, tick=None):
+    # long breaks: plain lines in logs, live status line on TTY via tick()
+    if secs <= 0:
+        return
+    if not UI_ON:
+        print(f"{label}: sleeping ~{secs // 60} min...", flush=True)
+        time.sleep(secs)
+        print(f"{label}: done.", flush=True)
+        return
+    end = time.time() + max(1, secs)
+    while True:
+        left = int(end - time.time())
+        if left <= 0:
+            break
+        if tick:
+            tick(left)
+        time.sleep(min(5, left))
+
+
+def slug(s, fallback="youtube_notes"):
+    s = re.sub(r"[^a-z0-9]+", "-", sanitize_filename(s, "").lower()).strip("-")
+    return (s[:60] or fallback) + ".md"
+
+
+WIN_RESERVED = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
+
+
+def sanitize_filename(s, fallback="untitled"):
+    """Cross-platform safe single path segment (Windows/macOS/Linux/Android)."""
+    tr = str.maketrans("şğüöçıİŞĞÜÖÇ", "sguociisguoc")
+    s = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "-", (s or "").translate(tr)).strip(" .")
+    if s.lower() in WIN_RESERVED:
+        s = "_" + s
+    s = (s or fallback).encode("utf-8")[:200].decode("utf-8", "ignore")
+    return s or fallback
+
+
+DEFAULT_TEMPLATES = {
+    "single": None,
+    "videos": "videos/{title} [{id}]",
+    "tree": "{channel}/{title}/transcript",
+}
+
+
+def render_template(tmpl, fields):
+    """Fill {field} placeholders; unknown fields become empty. Sanitize per segment."""
+    rel = re.sub(r"\{(\w+)\}", lambda m: str(fields.get(m.group(1), "")), tmpl or "")
+    segs = [sanitize_filename(p) for p in rel.split("/") if p.strip() and p.strip() != "."]
+    rel = "/".join(segs)
+    if rel and not rel.lower().endswith(".md"):
+        rel += ".md"
+    return rel or "untitled.md"
+
+
+def detect_langs(videos, probe=3, want=("tr", "en")):
+    """Sample the first few videos for ORIGINAL subtitle languages: (suggestion, found).
+    tlang translations are ignored (most 429-prone kind)."""
+    direct, anykey = {}, {}
+    with YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True,
+                    "socket_timeout": 20}) as ydl:
+        for v in videos[:probe]:
+            try:
+                info = ydl.extract_info(v["url"], download=False)
+            except Exception:
+                continue
+            for pool in (info.get("subtitles") or {}, info.get("automatic_captions") or {}):
+                for k, fmts in pool.items():
+                    anykey[k] = anykey.get(k, 0) + 1
+                    if any("tlang=" not in (f.get("url") or "") for f in fmts):
+                        direct[k] = direct.get(k, 0) + 1
+    shown = sorted(direct) or sorted(anykey)
+    for pool in (direct, anykey):
+        for w in want:
+            if w in pool:
+                return w, shown
+    for pool in (direct, anykey):
+        if pool:
+            return sorted(pool, key=lambda k: -pool[k])[0], shown
+    return "tr,en", []
+
+
+def split_output(out, budget):
+    """Split a finished md into <=budget-word parts at video boundaries. Returns part paths."""
+    raw = open(out, encoding="utf-8").read()
+    head, sep, body = raw.partition("---\n\n")
+    head = head + sep if sep else ""
+    sections = [s for s in body.split("---\n\n") if s.strip()]
+    base, ext = os.path.splitext(out)
+    parts, cur, curw, idx = [], [], 0, 0
+    for s in sections:
+        w = len(s.split())
+        if cur and curw + w > budget:
+            parts.append((idx + 1, cur))
+            cur, curw, idx = [], 0, idx + 1
+        cur.append(s)
+        curw += w
+    if cur:
+        parts.append((idx + 1, cur))
+    if len(parts) <= 1:
+        return []
+    paths = []
+    for i, secs in parts:
+        lines = head.split("\n")
+        if lines:
+            lines[0] += f" (part {i}/{len(parts)})"
+        p = f"{base}_part{i:02d}{ext}"
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + ("---\n\n".join(secs)) + "---\n")
+        paths.append(p)
+    return paths
+
+
+YT_RE = re.compile(r"(youtube\.com/(watch|shorts|playlist|@|channel/|c/|user/|live|embed)|youtu\.be/|[?&](list|v)=)")
+
+
+def show_intro():
+    print(panel("yt2md — YouTube to NotebookLM", [
+        "Turn a channel, playlist or videos into ONE Markdown file.",
+        "",
+        "  1. Paste link(s)      2. Check the auto-detected summary",
+        "  3. Press Enter        4. Upload the .md to NotebookLM",
+        "",
+        dim("NotebookLM cap: 500,000 words per source file."),
+    ]))
+
+
+def is_first_run():
+    p = os.path.expanduser("~/.config/yt2md/seen")
+    if os.path.exists(p):
+        return False
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").write("1")
+    except OSError:
+        return False
+    return True
+
+
+def show_guide():
+    print(panel("Quick guide", [
+        "Paste any YouTube link: channel, playlist or video.",
+        "The tool lists videos, guesses the file name + languages.",
+        "Big jobs run in chunks with breaks (anti-429 protection).",
+        "Progress is saved: Ctrl+C anytime, resume later.",
+        "When done, upload the .md (or _part files) to NotebookLM.",
+    ]))
+
+
+CONFIG_PATH = os.path.expanduser("~/.config/yt2md/config.json")
+DEFAULTS = {"outdir": ".", "layout": "single", "timestamps": False, "chunk": 50,
+            "chunk_cooldown_min": 10, "lang": "tr,en", "template": ""}
+
+ENV_MAP = {"outdir": "YT2MD_OUTDIR", "layout": "YT2MD_LAYOUT", "lang": "YT2MD_LANG",
+           "chunk": "YT2MD_CHUNK", "timestamps": "YT2MD_TIMESTAMPS",
+           "chunk_cooldown_min": "YT2MD_COOLDOWN_MIN", "template": "YT2MD_TEMPLATE"}
+
+
+def load_config():
+    """Config file: {"defaults": {...}, "profiles": {name: {...}}}. Old flat files count as defaults."""
+    raw = {}
+    try:
+        data = json.load(open(CONFIG_PATH, encoding="utf-8"))
+        if isinstance(data, dict):
+            raw = data
+    except (OSError, ValueError, TypeError):
+        pass
+    if "defaults" in raw or "profiles" in raw:
+        defaults, profiles = raw.get("defaults") or {}, raw.get("profiles") or {}
+    else:
+        defaults, profiles = raw, {}
+    if not isinstance(defaults, dict):
+        defaults = {}
+    if not isinstance(profiles, dict):
+        profiles = {}
+    return {"defaults": defaults, "profiles": profiles}
+
+
+def save_config(store):
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    json.dump(store, open(CONFIG_PATH, "w", encoding="utf-8"), indent=2)
+
+
+def _merge(base, store, profile, flags, env):
+    """Precedence: flags > env > profile > config defaults > builtins. Pure (testable)."""
+    cfg = dict(base)
+    cfg.update({k: v for k, v in store.get("defaults", {}).items() if k in base})
+    if profile and profile in store.get("profiles", {}):
+        cfg.update({k: v for k, v in store["profiles"][profile].items() if k in base})
+    for key, var in ENV_MAP.items():
+        if env.get(var, "") != "":
+            cfg[key] = env[var]
+    cfg.update({k: v for k, v in flags.items() if v is not None})
+    for key in ("chunk", "chunk_cooldown_min"):
+        try:
+            cfg[key] = max(0, int(cfg[key]))
+        except (ValueError, TypeError):
+            cfg[key] = base[key]
+    if isinstance(cfg.get("timestamps"), str):
+        cfg["timestamps"] = cfg["timestamps"].lower() in ("1", "y", "yes", "true")
+    if cfg.get("layout") not in ("single", "videos", "tree"):
+        cfg["layout"] = base["layout"]
+    return cfg
+
+
+def resolve_config(flags=None, profile=None):
+    return _merge(dict(DEFAULTS), load_config(), profile, flags or {}, dict(os.environ))
+
+
+def cmd_setup(advanced=False):
+    """Personalize: 3 sticky defaults (folder, layout, language); pacing under --advanced."""
+    store = load_config()
+    cfg = _merge(dict(DEFAULTS), store, None, {}, {})
+    print(panel("Personalize yt2md", ["CLI flags and YT2MD_* env vars always win over these."]))
+    cfg["outdir"] = input(f"Default folder [{cfg['outdir']}] > ").strip() or cfg["outdir"]
+    lay = input(f"Output layout (single/videos/tree) [{cfg['layout']}] > ").strip().lower() or cfg["layout"]
+    cfg["layout"] = lay if lay in ("single", "videos", "tree") else "single"
+    cfg["lang"] = input(f"Default languages [{cfg['lang']}] > ").strip() or cfg["lang"]
+    if advanced:
+        ts = input(f"Timestamps? (y/n) [{'y' if cfg['timestamps'] else 'n'}] > ").strip().lower()
+        if ts in ("y", "yes", "n", "no"):
+            cfg["timestamps"] = ts in ("y", "yes")
+        try:
+            cfg["chunk"] = max(0, int(input(f"Chunk size [{cfg['chunk']}] > ").strip() or cfg["chunk"]))
+        except ValueError:
+            pass
+        try:
+            cfg["chunk_cooldown_min"] = max(0, int(input(f"Chunk break minutes [{cfg['chunk_cooldown_min']}] > ").strip()
+                                                    or cfg["chunk_cooldown_min"]))
+        except ValueError:
+            pass
+        cfg["template"] = input(f"Name template [{cfg['template'] or 'layout default'}] > ").strip()
+    store["defaults"] = {k: cfg[k] for k in DEFAULTS if k in cfg}
+    name = input("Save as profile name [skip] > ").strip()
+    if name:
+        store.setdefault("profiles", {})[name] = dict(store["defaults"])
+        print(f"Profile '{name}': use with --profile {name} or YT2MD_PROFILE={name}")
+    save_config(store)
+    print(green("Saved to ") + CONFIG_PATH)
+    return cfg
+
+
+def tui():
+    cfg = resolve_config(profile=os.environ.get("YT2MD_PROFILE") or None)
+    show_intro()
+    if is_first_run():
+        show_guide()
+        if input("Personalize defaults now? (folder, layout...) [Y/n] > ").strip().lower() not in ("n", "no"):
+            cfg = cmd_setup()
+    while True:
+        raw = input("\nURLs (space/comma separated, several allowed) > ").strip()
+        if raw.lower() in ("q", "quit", "exit"):
+            return
+        urls = [u.strip(" ,") for u in re.split(r"[,\s]+", raw) if u.strip(" ,")]
+        if not urls:
+            print("No URLs, try again.")
+            continue
+        bad = [u for u in urls if not YT_RE.search(u)]
+        if bad:
+            print(red("Not a YouTube link: ") + ", ".join(bad))
+            continue
+        print("Listing videos, wait...")
+        videos, hint = expand(urls, 5000)
+        if not videos:
+            print("No videos found.")
+            continue
+        guess = slug(hint)
+        print("Sampling subtitle languages...")
+        sug, found = detect_langs(videos)
+        est = len(videos) * 12 / 60
+        print(table(["Setting", "Value"], [
+            ["Source", (hint or urls[0])[:60]],
+            ["Videos", str(len(videos))],
+            ["File", guess],
+            ["Languages", sug + (f"  (found: {', '.join(found[:8])})" if found else "")],
+            ["Est. time", f"~{est:.0f} min paced" if est >= 1 else "<1 min"],
+        ]))
+        out = input(f"Output file [{guess}] > ").strip() or guess
+        outdir = input(f"Folder [{cfg['outdir']}] > ").strip() or cfg["outdir"]
+        lay = input(f"Layout (single/videos/tree) [{cfg['layout']}] > ").strip().lower() or cfg["layout"]
+        lay = lay if lay in ("single", "videos", "tree") else "single"
+        lang = input(f"Languages [{sug}] > ").strip() or sug
+        mx = input(f"Max videos [{len(videos)}] > ").strip() or str(len(videos))
+        try:
+            max_n = max(1, int(mx))
+        except ValueError:
+            max_n = len(videos)
+        videos = videos[:max_n]
+        ch = input(f"Chunk size [{cfg['chunk']}] > ").strip() or str(cfg["chunk"])
+        try:
+            ch = max(0, int(ch))
+        except ValueError:
+            ch = cfg["chunk"]
+        cd = input(f"Chunk break minutes [{cfg['chunk_cooldown_min']}] > ").strip() or str(cfg["chunk_cooldown_min"])
+        try:
+            chc = max(0, int(cd)) * 60
+        except ValueError:
+            chc = cfg["chunk_cooldown_min"] * 60
+        yn = "y" if cfg["timestamps"] else "n"
+        ts = input(f"Timestamps? [{yn}] > ").strip().lower()
+        ts = cfg["timestamps"] if ts == "" else ts in ("y", "yes")
+        tmp = input(f"Name template [{cfg['template'] or 'layout default'}] > ").strip()
+        tmp = tmp or cfg["template"]
+        sp = input("Auto-split words for NotebookLM [0=off] > ").strip() or "0"
+        try:
+            sp = max(0, int(sp))
+        except ValueError:
+            sp = 0
+        print(f"\n{len(videos)} videos, output: {outdir}/{out}, langs: {lang}, layout: {lay}, "
+              f"chunk: {ch}/{chc // 60}min, timestamps: {ts}, template: {tmp or 'default'}, split: {sp or 'off'}")
+        go = input("[Enter]=start, q=cancel > ").strip()
+        if go.lower() in ("q", "quit"):
+            continue
+        try:
+            run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
+                    layout=lay, template=tmp)
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+        again = input("\nNew job? [Enter]=yes, q=quit > ").strip()
+        if again.lower() in ("q", "quit", "exit"):
+            return
+
+
+def _frontmatter(title, wurl, channel, vid, lg, auto):
+    t = " ".join((title or vid).split()).replace('"', "'")
+    c = " ".join((channel or "unknown").split()).replace('"', "'")
+    return (f"---\ntitle: \"{t}\"\nsource: {wurl}\nchannel: \"{c}\"\n"
+            f"video_id: {vid}\nlanguage: {lg}{' (auto)' if auto else ''}\n---\n\n")
+
+
+def _unique_path(vp, vid, used):
+    """Disambiguate slug collisions: second same-named file gets _<video_id>."""
+    if vp in used:
+        base, ext = os.path.splitext(vp)
+        vp = f"{base}_{vid}{ext}"
+    used.add(vp)
+    return vp
+
+
+def _count_lines(path):
+    try:
+        return sum(1 for ln in open(path, encoding="utf-8") if ln.strip())
+    except OSError:
+        return 0
+
+
+def _skip_map(skip_log):
+    """Parse 'title | url | reason' lines into {video_id_or_url: reason}."""
+    m = {}
+    if os.path.exists(skip_log):
+        for ln in open(skip_log, encoding="utf-8"):
+            parts = [p.strip() for p in ln.split(" | ")]
+            if len(parts) == 3:
+                t, u, s = parts
+                r = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", u)
+                m[r.group(1) if r else u] = s
+    return m
+
+
+def _write_index(root, videos, completed, words_by_id, skip_log):
+    """INDEX.md: every video with status, words and per-video file."""
+    reasons = _skip_map(skip_log)
+    rows = []
+    for v in videos:
+        vid = v["id"]
+        st = "done" if vid in completed else reasons.get(vid, "pending")
+        rows.append([v.get("title") or vid, st, str(words_by_id.get(vid, "-"))])
+    with open(os.path.join(root, "INDEX.md"), "w", encoding="utf-8") as f:
+        f.write(f"# Index\n\n- Videos: {len(videos)}\n- Done: {len(completed)}\n\n")
+        f.write(table(["Title", "Status", "Words"], rows))
+
+
+COLLECTION_KEYS = ("layout", "lang", "timestamps", "chunk", "chunk_cooldown_min")
+
+
+def _collection_override(root):
+    """Per-collection .yt2md.json overrides (safe subset only)."""
+    try:
+        data = json.load(open(os.path.join(root, ".yt2md.json"), encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: data[k] for k in COLLECTION_KEYS if k in data}
+
+
+def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cooldown=600,
+            throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
+            verbose=False, layout="single", template=""):
+    if videos is None:
+        videos, _ = expand(urls, max_n)
+    if outdir and outdir != ".":
+        outdir = os.path.expanduser(outdir)
+        os.makedirs(outdir, exist_ok=True)
+        out = os.path.join(outdir, out)
+    root = os.path.dirname(os.path.abspath(out))
+    coll = _collection_override(root)
+    if coll.get("layout") in ("single", "videos", "tree"):
+        layout = coll["layout"]
+    if isinstance(coll.get("lang"), str) and coll["lang"].strip():
+        lang_str = coll["lang"]
+    if isinstance(coll.get("timestamps"), bool):
+        ts = coll["timestamps"]
+    if coll.get("chunk") is not None:
+        try:
+            chunk = max(0, int(coll["chunk"]))
+        except (ValueError, TypeError):
+            pass
+    if coll.get("chunk_cooldown_min") is not None:  # minutes, like the TUI prompt
+        try:
+            chunk_cooldown = max(0, int(coll["chunk_cooldown_min"])) * 60
+        except (ValueError, TypeError):
+            pass
+    langs = [s.strip() for s in lang_str.split(",") if s.strip()]
+    total = len(videos)
+    print(f"{total} videos found", flush=True)
+    if not videos:
+        return
+    done_log, skip_log = out + ".done", out + ".skip"
+    done = set()
+    if not fresh and os.path.exists(done_log):
+        with open(done_log, encoding="utf-8") as f:
+            done = {ln.strip() for ln in f if ln.strip()}
+        print(f"resuming: {len(done)} videos already done", flush=True)
+    fresh_start = fresh or not os.path.exists(out)
+    mode = "w" if fresh_start else "a"
+    fout = open(out, mode, encoding="utf-8")
+    dlog = open(done_log, "w" if fresh_start else "a", encoding="utf-8")
+    slog = open(skip_log, "w" if fresh_start else "a", encoding="utf-8")
+    wlog = open(out + ".words", "w" if fresh_start else "a", encoding="utf-8")
+    if fresh_start:
+        done = set()
+    if mode == "w":
+        today = datetime.date.today().isoformat()
+        fout.write(f"# YouTube Research Notes\n\n- Date: {today}\n- Videos: target {total}\n"
+                   f"- Languages: {','.join(langs)}\n\nFeed this file to NotebookLM as a source.\n\n---\n\n")
+    todo = max(0, total - len(done))
+    completed = set(done)
+    words_by_id = {}
+    if not fresh_start and os.path.exists(out + ".words"):
+        try:
+            for ln in open(out + ".words", encoding="utf-8"):
+                p = ln.split()
+                if len(p) == 2:
+                    words_by_id[p[0]] = int(p[1])
+        except (OSError, ValueError):
+            pass
+    print(f"target: {todo} videos (chunk: {chunk}, chunk break: {chunk_cooldown // 60} min, layout: {layout})", flush=True)
+    ok, skip, words, consec, since_break, status = 0, [], 0, 0, 0, ""
+    used_paths = set()
+    global _VERBOSE
+    _VERBOSE = verbose
+    t0 = time.time()
+    ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                "writesubtitles": False, "socket_timeout": 20,
+                "subtitlesformat": "vtt/best"}
+    with YoutubeDL(ydl_opts) as ydl:
+        for i, v in enumerate(videos, 1):
+            if v["id"] in done:
+                continue
+            if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
+                if verbose:
+                    log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
+                _countdown(chunk_cooldown, "chunk break", lambda left: dash_update(
+                    ok + len(skip), todo, v["title"], ok, len(skip), words, t0,
+                    status=f"chunk break {left // 60:02d}:{left % 60:02d} left"))
+                status = ""
+                since_break = 0
+            since_break += 1
+            dash_update(ok + len(skip), todo, f"[{i}/{total}] {v['title']}",
+                        ok, len(skip), words, t0, status)
+            if verbose:
+                log(f"[{i}/{total}] {v['title'][:70]}")
+            try:
+                info = ydl.extract_info(v["url"], download=False)
+            except Exception as e:
+                if verbose:
+                    log(f"  ! skipped: {e}")
+                skip.append((v["title"], v["url"], str(e)))
+                consec = consec + 1 if _is_throttle(e) else 0
+                status = "throttled" if _is_throttle(e) else "extract failed"
+                if consec >= 5:
+                    if verbose:
+                        log("  ! 5 throttles in a row -> long cooldown")
+                    _countdown(throttle_cooldown, "throttle cooldown", lambda left: dash_update(
+                        ok + len(skip), todo, v["title"], ok, len(skip), words, t0,
+                        status=f"throttle cooldown {left // 60:02d}:{left % 60:02d} left"))
+                    consec, status = 0, ""
+                continue
+            title = info.get("title") or v["title"]
+            wurl = info.get("webpage_url") or v["url"]
+            lg, fmts, auto = pick_sub(info, langs)
+            if not fmts:
+                if verbose:
+                    log("  ! no subtitles, skipped")
+                skip.append((title, wurl, "no subtitles"))
+                consec, status = 0, "no subtitles"
+                continue
+            text, last = None, None
+            for _ in (1, 2):  # ponytail: 60s + ONE retry on 429; hot retries extend the ban
+                try:
+                    time.sleep(random.uniform(5, 10))
+                    text = vtt_to_text(fetch_vtt(fmts), ts).strip()
+                    break
+                except Exception as e:
+                    last = e
+                    if not _is_throttle(e):
+                        break
+                    status = "429: 60s break + single retry"
+                    if verbose:
+                        log("  ! 429: 60s break + single retry")
+                    time.sleep(60)
+            if text is None:
+                if verbose:
+                    log(f"  ! subtitle download failed: {last}")
+                skip.append((title, wurl, str(last)))
+                consec = consec + 1 if _is_throttle(last) else 0
+                status = "throttled" if _is_throttle(last) else "subtitle failed"
+                if consec >= 5:
+                    if verbose:
+                        log("  ! 5 throttles in a row -> long cooldown")
+                    _countdown(throttle_cooldown, "throttle cooldown", lambda left: dash_update(
+                        ok + len(skip), todo, title, ok, len(skip), words, t0,
+                        status=f"throttle cooldown {left // 60:02d}:{left % 60:02d} left"))
+                    consec, status = 0, ""
+                continue
+            consec, status = 0, ""
+            if len(text) < 50:
+                skip.append((title, wurl, "subtitle too short"))
+                consec, status = 0, "subtitle too short"
+                continue
+            fout.write(f"## {i}. {title}\n\n- Source: {wurl}\n"
+                       f"- Video ID: {v['id']}\n- Subtitle lang: {lg}{' (auto)' if auto else ''}\n\n{text}\n\n---\n\n")
+            fout.flush()
+            dlog.write(v["id"] + "\n")
+            dlog.flush()
+            ok += 1
+            nwords = len(text.split())
+            words += nwords
+            completed.add(v["id"])
+            done.add(v["id"])
+            words_by_id[v["id"]] = nwords
+            wlog.write(f"{v['id']} {nwords}\n")
+            wlog.flush()
+            if layout != "single":
+                fields = {"channel": v.get("channel") or info.get("channel") or "channel",
+                          "title": title or v["id"], "id": v["id"],
+                          "index": f"{i:02d}", "date": datetime.date.today().isoformat(),
+                          "lang": lg}
+                vp = _unique_path(os.path.join(root, render_template(
+                    template or DEFAULT_TEMPLATES[layout], fields)), v["id"], used_paths)
+                os.makedirs(os.path.dirname(vp), exist_ok=True)
+                with open(vp, "w", encoding="utf-8") as vf:
+                    vf.write(_frontmatter(title, wurl, v.get("channel") or info.get("channel"),
+                                          v["id"], lg, auto))
+                    vf.write(f"## {title}\n\n{text}\n")
+            dash_update(ok + len(skip), todo, v["title"], ok, len(skip), words, t0)
+            time.sleep(sleep)
+    dash_update(todo, todo, "done", ok, len(skip), words, t0)
+    dash_end()
+    for t, u, s in skip:
+        slog.write(f"{t} | {u} | {s}\n")
+    fout.close()
+    dlog.close()
+    slog.close()
+    wlog.close()
+    if layout != "single":
+        _write_index(root, videos, completed, words_by_id, skip_log)
+        print(f"index: {os.path.join(root, 'INDEX.md')}", flush=True)
+    try:  # reconcile .skip: drop fixed videos + dedupe, so counts/tail stay honest
+        seen, kept = set(), []
+        if os.path.exists(skip_log):
+            for ln in open(skip_log, encoding="utf-8"):
+                s = ln.strip()
+                if not s:
+                    continue
+                r = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", s)
+                key = r.group(1) if r else s
+                if key not in completed and key not in seen:
+                    seen.add(key)
+                    kept.append(s)
+        with open(skip_log, "w", encoding="utf-8") as f:
+            f.write("\n".join(kept) + ("\n" if kept else ""))
+    except OSError:
+        pass
+    ndone = _count_lines(done_log)
+    nskip = _count_lines(skip_log)
+    if ndone + nskip >= len(videos):
+        if nskip > 0:
+            tail_done = False
+            try:
+                with open(out, "rb") as _f:
+                    _f.seek(max(0, os.path.getsize(out) - 5000))
+                    tail_done = b"## Skipped" in _f.read()
+            except OSError:
+                pass
+            if not tail_done:
+                with open(out, "a", encoding="utf-8") as f:
+                    f.write("\n## Skipped\n\n")
+                    for ln in open(skip_log, encoding="utf-8"):
+                        f.write(f"- {ln}")
+        dash_end()
+        print(panel("Done", [
+            f"{green(str(ndone))} videos -> {out} ({nskip} skipped)",
+            f"~{words} words this run",
+        ]))
+        if split_words > 0:
+            total_words = len(open(out, encoding="utf-8").read().split())
+            if total_words > split_words:
+                parts = split_output(out, split_words)
+                if len(parts) > 1:
+                    print(panel("Upload to NotebookLM", ["Add each part as a separate source:"]
+                                + [f"  {j}. {p}" for j, p in enumerate(parts, 1)]))
+                else:
+                    print(f"Single file is enough ({total_words} words).")
+            else:
+                print(f"No split needed ({total_words} words <= {split_words}).")
+        else:
+            print("Upload to NotebookLM: add this file as a source.")
+            print(dim("Cap is 500,000 words/file — use --split-words if bigger."))
+    else:
+        dash_end()
+        print(f"Checkpoint: {ok} videos, {words} words -> {out} (total: {ndone}/{len(videos)})")
+
+
+def cmd_status(d="."):
+    d = os.path.expanduser(d)
+    try:
+        files = sorted(os.listdir(d))
+    except OSError as e:
+        print(f"Cannot list {d}: {e}")
+        return
+    rows = []
+    for f in files:
+        if not f.endswith(".md") or "_part" in f:
+            continue
+        path = os.path.join(d, f)
+        dn = _count_lines(path + ".done")
+        sk = _count_lines(path + ".skip")
+        rows.append([f, str(dn), str(sk), f"{os.path.getsize(path) // 1024} KB"])
+    if not rows:
+        print(f"No collections in {d}.")
+        return
+    print(table(["Collection", "Done", "Skipped", "Size"], rows))
+
+
+def cmd_dryrun(urls, max_n, lang_str):
+    videos, hint = expand(urls, max_n)
+    if not videos:
+        print("No videos found.")
+        return
+    sug, found = detect_langs(videos)
+    est = len(videos) * 12 / 60
+    print(table(["Setting", "Value"], [
+        ["Source", (hint or urls[0])[:60]],
+        ["Videos", str(len(videos))],
+        ["Languages", sug + (f"  (found: {', '.join(found[:8])})" if found else "")],
+        ["Est. time", f"~{est:.0f} min paced" if est >= 1 else "<1 min"],
+        ["Est. words", f"~{len(videos) * 2000} (rough: ~2k/video)"],
+    ]))
+    print("Dry run: nothing downloaded. Drop --dry-run to start.")
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "status":
+        cmd_status(sys.argv[2] if len(sys.argv) > 2 else ".")
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "setup":
+        cmd_setup("--advanced" in sys.argv)
+        return
+    ap = argparse.ArgumentParser(description="YouTube -> single Markdown (NotebookLM feed)")
+    ap.add_argument("urls", nargs="*", help="channel / playlist / video URLs")
+    ap.add_argument("-o", "--out", default="youtube_notes.md")
+    ap.add_argument("--lang", default=None, help="subtitle language priority, comma separated")
+    ap.add_argument("--max", type=int, default=100, help="max number of videos")
+    ap.add_argument("--sleep", type=float, default=2.0, help="pause between videos (s)")
+    ap.add_argument("--chunk", type=int, default=None, help="long break every N videos")
+    ap.add_argument("--chunk-cooldown", type=int, default=None, help="break between chunks (s)")
+    ap.add_argument("--throttle-cooldown", type=int, default=1800, help="break after 5 throttles in a row (s)")
+    ap.add_argument("-d", "--dir", default=None, help="output folder (created if missing)")
+    ap.add_argument("--layout", default=None, help="output layout: single, videos or tree")
+    ap.add_argument("--timestamps", action="store_true", default=None, help="keep [MM:SS] markers in transcripts")
+    ap.add_argument("--name-template", default=None, help='per-video path template, e.g. "{channel}/{title} [{id}]"')
+    ap.add_argument("--profile", default=None, help="config profile name (or YT2MD_PROFILE)")
+    ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
+    ap.add_argument("--tui", action="store_true", help="interactive mode (short command)")
+    ap.add_argument("--verbose", action="store_true", help="scrolling log lines instead of the live dashboard")
+    ap.add_argument("--dry-run", action="store_true", help="list + estimate only, download nothing")
+    ap.add_argument("--fresh", action="store_true", help="discard previous progress, start over")
+    ap.add_argument("--self-test", action="store_true")
+    a = ap.parse_args()
+    if a.self_test:
+        _self_test()
+        return
+    if a.tui or not a.urls:
+        try:
+            tui()
+        except (KeyboardInterrupt, EOFError):
+            print("\nExit.")
+        return
+    profile = a.profile or os.environ.get("YT2MD_PROFILE") or None
+    cfg = resolve_config({"outdir": a.dir, "layout": a.layout, "lang": a.lang,
+                          "chunk": a.chunk, "timestamps": a.timestamps,
+                          "chunk_cooldown_min": (a.chunk_cooldown // 60
+                                                 if a.chunk_cooldown is not None else None),
+                          "template": a.name_template}, profile)
+    if a.dry_run:
+        cmd_dryrun(a.urls, a.max, cfg["lang"])
+        return
+    run_job(a.urls, a.out, cfg["lang"], a.max, a.sleep, a.fresh, cfg["chunk"],
+            cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
+            ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
+            layout=cfg["layout"], template=cfg["template"])
+
+
+if __name__ == "__main__":
+    main()
