@@ -1102,7 +1102,10 @@ def _download_audio(vid, tmpdir):
     return None, "audio file not found"
 
 
-def _gemini_call(prompt_text, model="gemini-2.0-flash"):
+_GEMINI_MODEL = "gemini-2.5-flash-lite"
+
+
+def _gemini_call(prompt_text, model=_GEMINI_MODEL):
     """Raw Gemini generateContent call over stdlib. Needs GEMINI_API_KEY."""
     key = os.environ.get("GEMINI_API_KEY", "")
     if not key:
@@ -1123,7 +1126,7 @@ def _gemini_call(prompt_text, model="gemini-2.0-flash"):
         raise RuntimeError(f"Gemini API unexpected response: {str(resp)[:200]}")
 
 
-def _gemini_transcribe(audio_bytes, mime, lang="en", model="gemini-2.0-flash"):
+def _gemini_transcribe(audio_bytes, mime, lang="en", model=_GEMINI_MODEL):
     """Send audio to Gemini API, return verbatim transcript. Needs GEMINI_API_KEY."""
     import base64
     key = os.environ.get("GEMINI_API_KEY", "")
@@ -1153,11 +1156,11 @@ def _summary_prompt(text, lang):
             f"Reply in {lang}. Transcript:\n\n{text[:30000]}")
 
 
-def _gemini_summarize(text, lang="en"):
-    return _gemini_call(_summary_prompt(text, lang))
+def _gemini_summarize(text, lang="en", model=_GEMINI_MODEL):
+    return _gemini_call(_summary_prompt(text, lang), model)
 
 
-def _try_transcribe(vid, lang, tmpdir):
+def _try_transcribe(vid, lang, tmpdir, model=_GEMINI_MODEL):
     """Captionless fallback: audio download + Gemini. Returns (text, note) or (None, reason)."""
     import tempfile
     path, ext = _download_audio(vid, tmpdir)
@@ -1169,7 +1172,7 @@ def _try_transcribe(vid, lang, tmpdir):
         if os.path.getsize(path) > AUDIO_MAX_BYTES:
             return None, "audio too large for API (>18MB)"
         with open(path, "rb") as f:
-            text = _gemini_transcribe(f.read(), AUDIO_MIMES[ext], lang)
+            text = _gemini_transcribe(f.read(), AUDIO_MIMES[ext], lang, model)
         if len(text) < 50:
             return None, "transcript too short"
         return text, "transcribed via Gemini"
@@ -1181,7 +1184,7 @@ def _try_transcribe(vid, lang, tmpdir):
 
 
 def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
-                transcribe=False, tmpdir=None, summarize=False):
+                transcribe=False, tmpdir=None, summarize=False, gemini_model=_GEMINI_MODEL):
     """One video, network only, never raises (except disk-full).
     Returns dict with stage: extract|subs|fetch|ok."""
     res = {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
@@ -1197,7 +1200,8 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
             lg, fmts, auto = pick_sub(info, langs)
             if not fmts:
                 if transcribe:
-                    ttext, note = _try_transcribe(v["id"], langs[0] if langs else "en", tmpdir)
+                    ttext, note = _try_transcribe(v["id"], langs[0] if langs else "en", tmpdir,
+                                                  gemini_model)
                     if ttext is not None:
                         res.update(lg=langs[0] if langs else "en", auto=False, text=ttext,
                                    trans=True, stage="ok")
@@ -1224,7 +1228,7 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                         res["text"] = _clean_text(res["text"])
                     if summarize and len(res["text"].split()) > 100:
                         try:
-                            res["summary"] = _gemini_summarize(res["text"], lg)
+                            res["summary"] = _gemini_summarize(res["text"], lg, gemini_model)
                         except Exception as e:
                             res["summary_error"] = str(e) or type(e).__name__
                     res["cached"] = cached
@@ -1250,16 +1254,16 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
 
 
 def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
-            transcribe=False, tmpdir=None, summarize=False):
+            transcribe=False, tmpdir=None, summarize=False, gemini_model=_GEMINI_MODEL):
     """Yield (i, v, res) in submission order; purely serial when workers<=1."""
     if workers <= 1:
         for i, v in work:
             yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap, clean,
-                                    transcribe, tmpdir, summarize)
+                                    transcribe, tmpdir, summarize, gemini_model)
         return
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap,
-                                 clean, transcribe, tmpdir, summarize)) for i, v in work]
+                                 clean, transcribe, tmpdir, summarize, gemini_model)) for i, v in work]
         for i, v, fu in futs:
             try:
                 yield i, v, fu.result()
@@ -1277,7 +1281,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
             verbose=False, layout="single", template="", pdf=False,
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
-            workers=1, clean=True, transcribe=False, summarize=False):
+            workers=1, clean=True, transcribe=False, summarize=False,
+            gemini_model=_GEMINI_MODEL):
     if videos is None:
         videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
@@ -1368,7 +1373,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         print(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
     with YoutubeDL(ydl_opts) as ydl:
         for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap,
-                                clean, transcribe, tmpdir, summarize):
+                                clean, transcribe, tmpdir, summarize, gemini_model):
             if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
                 if verbose:
                     log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
@@ -1733,6 +1738,7 @@ def main():
     ap.add_argument("--pdf", action="store_true", help="also write PDF next to the Markdown (needs fpdf2)")
     ap.add_argument("--transcribe", action="store_true", help="transcribe captionless videos via Gemini API (needs GEMINI_API_KEY)")
     ap.add_argument("--summarize", action="store_true", help="add Gemini summary per video (needs GEMINI_API_KEY)")
+    ap.add_argument("--gemini-model", default=None, help="Gemini model for transcribe/summarize (default: gemini-2.5-flash-lite)")
     ap.add_argument("--proxy", default=None, help="proxy URL for all requests (yt-dlp syntax, e.g. socks5://127.0.0.1:1080)")
     ap.add_argument("--cookies", default=None, help="Netscape cookies.txt file (helps logged-in/age-gated content)")
     ap.add_argument("--tui", action="store_true", help="interactive mode (short command)")
@@ -1781,7 +1787,8 @@ def main():
             layout=cfg["layout"], template=cfg["template"], pdf=a.pdf,
             proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile,
             fetch_gap=fetch_gap, workers=workers, clean=cfg["clean"],
-            transcribe=a.transcribe, summarize=a.summarize)
+            transcribe=a.transcribe, summarize=a.summarize,
+            gemini_model=a.gemini_model or _GEMINI_MODEL)
 
 
 if __name__ == "__main__":
