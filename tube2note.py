@@ -216,7 +216,9 @@ def _self_test():
     assert _is_throttle(E()) and not _is_throttle(ValueError())
     assert _is_throttle(Exception("HTTP Error 429: Too Many Requests"))
     assert _is_throttle(Exception("ERROR: [youtube] x: HTTP Error 429"))
+    assert not _is_throttle(Exception("video abc429XYZ12 unavailable"))
     assert not _is_throttle(OSError("disk full"))
+    assert _fold_latin1("Şarj ğü") == "Sarj gu"
     assert slug("PickY Audio!") == "picky-audio.md"
     assert _md_line_kind("## Hello") == ("h2", "Hello")
     assert _md_line_kind("- item") == ("bullet", "item")
@@ -355,7 +357,7 @@ def _is_throttle(e):
     if getattr(e, "code", None) in (429, 500, 502, 503):
         return True
     msg = str(e)
-    return "429" in msg or "Too Many Requests" in msg
+    return re.search(r"\b429\b", msg) is not None or "Too Many Requests" in msg
 
 
 def _countdown(secs, label, tick=None):
@@ -799,20 +801,34 @@ def _md_line_kind(line):
     return ("para", s.strip())
 
 
+TR_FOLD = str.maketrans("şŞğĞüÜöÖçÇıİ", "sSgGuUoOcCiI")
+
+
+def _fold_latin1(s):
+    """Best-effort Turkish-preserving fold into latin-1 (for core PDF fonts)."""
+    return s.translate(TR_FOLD).encode("latin-1", "replace").decode("latin-1")
+
+
 def _pdf_font(pdf):
-    """Unicode TTF if found (Turkish glyphs), else core helvetica."""
+    """(font_name, unicode_ok, bold_ok). Prefers a Unicode TTF (Turkish glyphs)."""
     for p in ("/system/fonts/DroidSans.ttf",
               "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
               "/data/data/com.termux/files/usr/share/fonts/DejaVuSans.ttf"):
-        if os.path.exists(p):
+        if not os.path.exists(p):
+            continue
+        try:
             pdf.add_font("body", "", p)
-            try:
-                b = p.replace(".ttf", "-Bold.ttf")
-                pdf.add_font("body", "B", b if os.path.exists(b) else p)
-            except Exception:
-                pass
-            return "body"
-    return "helvetica"
+        except Exception:
+            continue
+        bold_ok = False
+        try:
+            b = p.replace(".ttf", "-Bold.ttf")
+            pdf.add_font("body", "B", b if os.path.exists(b) else p)
+            bold_ok = True
+        except Exception:
+            pass
+        return "body", True, bold_ok
+    return "helvetica", False, True
 
 
 def md_to_pdf(md_path, pdf_path=None):
@@ -825,13 +841,17 @@ def md_to_pdf(md_path, pdf_path=None):
     pdf_path = pdf_path or os.path.splitext(md_path)[0] + ".pdf"
     pdf = FPDF()
     pdf.set_auto_page_break(True, margin=20)
-    font = _pdf_font(pdf)
+    font, uni, bold_ok = _pdf_font(pdf)
+    if not uni:
+        print("warning: no Unicode font found — non-latin glyphs will be folded to ASCII", flush=True)
     pdf.add_page()
     pdf.set_font(font, size=11)
     # ponytail: fpdf2 2.8 leaves the cursor at the right margin after
     # multi_cell; force LMARGIN or the next line has zero width and crashes.
-    mc = lambda h, t, s=11, st="": (pdf.set_font(font, st, s),
-                                    pdf.multi_cell(0, h, t, new_x=XPos.LMARGIN, new_y=YPos.NEXT))
+    def mc(h, t, s=11, st=""):
+        pdf.set_font(font, st if (st != "B" or bold_ok) else "", s)
+        pdf.multi_cell(0, h, t if uni else _fold_latin1(t),
+                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     for raw in open(md_path, encoding="utf-8").read().splitlines():
         if not raw.strip():
             pdf.ln(3)
@@ -1015,34 +1035,34 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 fout.flush()
                 dlog.write(v["id"] + "\n")
                 dlog.flush()
+                ok += 1
+                nwords = len(text.split())
+                words += nwords
+                completed.add(v["id"])
+                done.add(v["id"])
+                words_by_id[v["id"]] = nwords
+                wlog.write(f"{v['id']} {nwords}\n")
+                wlog.flush()
+                if layout != "single":
+                    fields = {"channel": v.get("channel") or info.get("channel") or "channel",
+                              "title": title or v["id"], "id": v["id"],
+                              "index": f"{i:02d}", "date": datetime.date.today().isoformat(),
+                              "lang": lg}
+                    vp = _unique_path(os.path.join(root, render_template(
+                        template or DEFAULT_TEMPLATES[layout], fields)), v["id"], used_paths)
+                    if _existing_vid(vp) not in (None, v["id"]):
+                        # another session's different video owns this path: do not overwrite
+                        base, ext = os.path.splitext(vp)
+                        vp = f"{base}_{v['id']}{ext}"
+                        used_paths.add(vp)
+                    os.makedirs(os.path.dirname(vp), exist_ok=True)
+                    with open(vp, "w", encoding="utf-8") as vf:
+                        vf.write(_frontmatter(title, wurl, v.get("channel") or info.get("channel"),
+                                              v["id"], lg, auto))
+                        vf.write(f"## {title}\n\n{text}\n")
             except OSError as e:
                 print(red(f"  ! FATAL disk/IO error, stopping: {e}"))
                 raise SystemExit(1)
-            ok += 1
-            nwords = len(text.split())
-            words += nwords
-            completed.add(v["id"])
-            done.add(v["id"])
-            words_by_id[v["id"]] = nwords
-            wlog.write(f"{v['id']} {nwords}\n")
-            wlog.flush()
-            if layout != "single":
-                fields = {"channel": v.get("channel") or info.get("channel") or "channel",
-                          "title": title or v["id"], "id": v["id"],
-                          "index": f"{i:02d}", "date": datetime.date.today().isoformat(),
-                          "lang": lg}
-                vp = _unique_path(os.path.join(root, render_template(
-                    template or DEFAULT_TEMPLATES[layout], fields)), v["id"], used_paths)
-                if _existing_vid(vp) not in (None, v["id"]):
-                    # another session's different video owns this path: do not overwrite
-                    base, ext = os.path.splitext(vp)
-                    vp = f"{base}_{v['id']}{ext}"
-                    used_paths.add(vp)
-                os.makedirs(os.path.dirname(vp), exist_ok=True)
-                with open(vp, "w", encoding="utf-8") as vf:
-                    vf.write(_frontmatter(title, wurl, v.get("channel") or info.get("channel"),
-                                          v["id"], lg, auto))
-                    vf.write(f"## {title}\n\n{text}\n")
             dash_update(ok + len(skip), todo, v["title"], ok, len(skip), words, t0)
             time.sleep(sleep)
     dash_update(todo, todo, "done", ok, len(skip), words, t0)
