@@ -20,7 +20,10 @@ import random
 import re
 import shutil
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+
 import urllib.request
 
 from yt_dlp import YoutubeDL
@@ -256,6 +259,11 @@ def _self_test():
     assert render_template("{channel}/{title} [{id}]", {"channel": "C", "title": "T", "id": "ID1"}) == "C/T [ID1].md"
     assert render_template("{nope}/x", {"a": "b"}) == "x.md"
     assert _unique_path("a/b.md", "ID1", {"a/b.md"}) == "a/b_ID1.md"
+    b = Bucket(rate=10, capacity=2)
+    t = time.time()
+    b.wait()
+    b.wait()
+    assert time.time() - t < 2
     segs = vtt_segments("WEBVTT\n\n00:00.500 --> 00:02.000\nhello\n\n00:02.000 --> 00:04.000\nworld\n")
     assert segs == [(0.5, "hello"), (2.0, "world")]
     chtext = _join_paras([(10.0, "a"), (70.0, "b"), (130.0, "c")], False, [(0, "Intro"), (60, "Main")])
@@ -421,6 +429,27 @@ def _is_throttle(e):
         return True
     msg = str(e)
     return re.search(r"\b429\b", msg) is not None or "Too Many Requests" in msg
+
+
+class Bucket:
+    """Thread-safe token bucket: max `rate` timedtext fetches/sec, `capacity` burst."""
+
+    def __init__(self, rate, capacity):
+        self.rate, self.capacity = rate, capacity
+        self.tokens, self.stamp = capacity, time.monotonic()
+        self.lock = threading.Lock()
+
+    def wait(self):
+        while True:
+            with self.lock:
+                now = time.monotonic()
+                self.tokens = min(self.capacity, self.tokens + (now - self.stamp) * self.rate)
+                self.stamp = now
+                if self.tokens >= 1:
+                    self.tokens -= 1
+                    return
+                pause = (1 - self.tokens) / self.rate
+            time.sleep(min(pause, 1.0))
 
 
 def _countdown(secs, label, tick=None):
@@ -749,6 +778,11 @@ def tui():
         pdf = input("PDF too? [n] > ").strip().lower() in ("y", "yes")
         tmp = input(f"Name template [{cfg['template'] or 'layout default'}] > ").strip()
         tmp = tmp or cfg["template"]
+        wk = input("Workers [1] > ").strip() or "1"
+        try:
+            wk = min(4, max(1, int(wk)))
+        except ValueError:
+            wk = 1
         sp = input("Auto-split words for NotebookLM [0=off] > ").strip() or "0"
         try:
             sp = max(0, int(sp))
@@ -761,7 +795,7 @@ def tui():
             continue
         try:
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
-                    layout=lay, template=tmp, pdf=pdf, since=since, profile=prof)
+                    layout=lay, template=tmp, pdf=pdf, since=since, profile=prof, workers=wk)
         except KeyboardInterrupt:
             print("\nCancelled.")
         again = input("\nNew job? [Enter]=yes, q=quit > ").strip()
@@ -995,10 +1029,85 @@ def _get_vtt(vid, lg, auto, fmts, opener, fetch_gap=10):
     return vtt, False
 
 
+def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap):
+    """One video, network only, never raises (except disk-full).
+    Returns dict with stage: extract|subs|fetch|ok."""
+    res = {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
+           "channel": v.get("channel"), "lg": None, "auto": False,
+           "text": None, "error": None, "throttled": False,
+           "stage": "extract", "chapters": [], "meta": {}}
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(v["url"], download=False)
+            res["title"] = info.get("title") or res["title"]
+            res["wurl"] = info.get("webpage_url") or res["wurl"]
+            res["channel"] = res["channel"] or info.get("channel")
+            lg, fmts, auto = pick_sub(info, langs)
+            if not fmts:
+                res["error"] = "no subtitles"
+                res["stage"] = "subs"
+                return res
+            res.update(lg=lg, auto=auto)
+            res["chapters"] = [(c.get("start_time") or 0, c.get("title") or "")
+                               for c in (info.get("chapters") or []) if c.get("title")]
+            res["meta"] = _video_meta(info)
+            last = None
+            for _ in (1, 2):  # ponytail: 60s + ONE retry on 429; hot retries extend the ban
+                try:
+                    if bucket is not None:
+                        bucket.wait()
+                    vtt, cached = _get_vtt(v["id"], lg, auto, fmts, ydl.urlopen,
+                                          0 if bucket is not None else fetch_gap)
+                    res["text"] = _join_paras(vtt_segments(vtt), ts, res["chapters"] or None).strip()
+                    res["cached"] = cached
+                    res["stage"] = "ok"
+                    return res
+                except Exception as e:
+                    last = e
+                    if getattr(e, "errno", None) == 28:
+                        raise
+                    if not _is_throttle(e):
+                        break
+                    time.sleep(60)
+            res["error"] = f"subtitle download failed: {last}"
+            res["throttled"] = _is_throttle(last)
+            res["stage"] = "fetch"
+            return res
+    except Exception as e:
+        if getattr(e, "errno", None) == 28:
+            raise
+        res["error"] = str(e) or type(e).__name__
+        res["throttled"] = _is_throttle(e)
+        return res
+
+
+def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap):
+    """Yield (i, v, res) in submission order; purely serial when workers<=1."""
+    if workers <= 1:
+        for i, v in work:
+            yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap)
+        return
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap))
+                for i, v in work]
+        for i, v, fu in futs:
+            try:
+                yield i, v, fu.result()
+            except Exception as e:
+                if getattr(e, "errno", None) == 28:
+                    raise
+                yield i, v, {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
+                             "channel": v.get("channel"), "lg": None, "auto": False,
+                             "text": None, "error": str(e) or type(e).__name__,
+                             "throttled": _is_throttle(e), "stage": "extract",
+                             "chapters": [], "meta": {}}
+
+
 def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cooldown=600,
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
             verbose=False, layout="single", template="", pdf=False,
-            proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10):
+            proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
+            workers=1):
     if videos is None:
         videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
@@ -1070,15 +1179,18 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     t0 = time.time()
     ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True,
                 "writesubtitles": False, "socket_timeout": 20,
-                "subtitlesformat": "vtt/best"}
+                "subtitlesformat": "vtt/best",
+                "extractor_args": {"youtube": {"skip": ["translated_subs"]}}}
     if proxy:
         ydl_opts["proxy"] = proxy
     if cookiefile:
         ydl_opts["cookiefile"] = os.path.expanduser(cookiefile)
+    bucket = Bucket(rate=0.15, capacity=2) if workers > 1 else None
+    work = [(i, v) for i, v in enumerate(videos, 1) if v["id"] not in done]
+    if workers > 1:
+        print(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
     with YoutubeDL(ydl_opts) as ydl:
-        for i, v in enumerate(videos, 1):
-            if v["id"] in done:
-                continue
+        for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap):
             if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
                 if verbose:
                     log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
@@ -1092,16 +1204,12 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                         ok, len(skip), words, t0, status)
             if verbose:
                 log(f"[{i}/{total}] {v['title'][:70]}")
-            try:
-                info = ydl.extract_info(v["url"], download=False)
-            except Exception as e:
-                if getattr(e, "errno", None) == 28:
-                    raise
+            if res["stage"] == "extract":
                 if verbose:
-                    log(f"  ! skipped: {e}")
-                skip.append((v["title"], v["url"], str(e)))
-                consec = consec + 1 if _is_throttle(e) else 0
-                status = "throttled" if _is_throttle(e) else "extract failed"
+                    log(f"  ! skipped: {res['error']}")
+                skip.append((v["title"], v["url"], res["error"]))
+                consec = consec + 1 if res["throttled"] else 0
+                status = "throttled" if res["throttled"] else "extract failed"
                 if consec >= 5:
                     if verbose:
                         log("  ! 5 throttles in a row -> long cooldown")
@@ -1110,41 +1218,22 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                         status=f"throttle cooldown {left // 60:02d}:{left % 60:02d} left"))
                     consec, status = 0, ""
                 continue
-            title = info.get("title") or v["title"]
-            wurl = info.get("webpage_url") or v["url"]
-            lg, fmts, auto = pick_sub(info, langs)
-            if not fmts:
+            title, wurl, lg, auto = res["title"], res["wurl"], res["lg"], res["auto"]
+            if res["stage"] == "subs":
                 if verbose:
                     log("  ! no subtitles, skipped")
                 skip.append((title, wurl, "no subtitles"))
                 consec, status = 0, "no subtitles"
                 continue
-            text, last = None, None
-            for _ in (1, 2):  # ponytail: 60s + ONE retry on 429; hot retries extend the ban
-                try:
-                    vtt, cached = _get_vtt(v["id"], lg, auto, fmts, ydl.urlopen, fetch_gap)
-                    chaps = [(c.get("start_time") or 0, c.get("title") or "")
-                             for c in (info.get("chapters") or []) if c.get("title")]
-                    text = _join_paras(vtt_segments(vtt), ts, chaps or None).strip()
-                    if cached and verbose:
-                        log("  (from cache)")
-                    break
-                except Exception as e:
-                    last = e
-                    if getattr(e, "errno", None) == 28:
-                        raise
-                    if not _is_throttle(e):
-                        break
-                    status = "429: 60s break + single retry"
-                    if verbose:
-                        log("  ! 429: 60s break + single retry")
-                    time.sleep(60)
+            text = res["text"]
+            if res.get("cached") and verbose:
+                log("  (from cache)")
             if text is None:
                 if verbose:
-                    log(f"  ! subtitle download failed: {last}")
-                skip.append((title, wurl, str(last)))
-                consec = consec + 1 if _is_throttle(last) else 0
-                status = "throttled" if _is_throttle(last) else "subtitle failed"
+                    log(f"  ! subtitle download failed: {res['error']}")
+                skip.append((title, wurl, res["error"]))
+                consec = consec + 1 if res["throttled"] else 0
+                status = "throttled" if res["throttled"] else "subtitle failed"
                 if consec >= 5:
                     if verbose:
                         log("  ! 5 throttles in a row -> long cooldown")
@@ -1173,7 +1262,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 wlog.write(f"{v['id']} {nwords}\n")
                 wlog.flush()
                 if layout != "single":
-                    fields = {"channel": v.get("channel") or info.get("channel") or "channel",
+                    fields = {"channel": v.get("channel") or res.get("channel") or "channel",
                               "title": title or v["id"], "id": v["id"],
                               "index": f"{i:02d}", "date": datetime.date.today().isoformat(),
                               "lang": lg}
@@ -1186,8 +1275,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                         used_paths.add(vp)
                     os.makedirs(os.path.dirname(vp), exist_ok=True)
                     with open(vp, "w", encoding="utf-8") as vf:
-                        vf.write(_frontmatter(title, wurl, v.get("channel") or info.get("channel"),
-                                              v["id"], lg, auto, _video_meta(info)))
+                        vf.write(_frontmatter(title, wurl, v.get("channel") or res.get("channel"),
+                                              v["id"], lg, auto, res.get("meta")))
                         vf.write(f"## {title}\n\n{text}\n")
             except OSError as e:
                 print(red(f"  ! FATAL disk/IO error, stopping: {e}"))
@@ -1442,6 +1531,7 @@ def main():
     ap.add_argument("--chunk", type=int, default=None, help="long break every N videos")
     ap.add_argument("--chunk-cooldown", type=int, default=None, help="break between chunks (s)")
     ap.add_argument("--fetch-gap", type=int, default=None, help="max pause before subtitle fetch, seconds (default 10)")
+    ap.add_argument("--workers", type=int, default=1, help="parallel fetch workers 1-4 (default 1, serial and safest)")
     ap.add_argument("--throttle-cooldown", type=int, default=1800, help="break after 5 throttles in a row (s)")
     ap.add_argument("-d", "--dir", default=None, help="output folder (created if missing)")
     ap.add_argument("--layout", default=None, help="output layout: single, videos or tree")
@@ -1476,6 +1566,7 @@ def main():
                                                  if a.chunk_cooldown is not None else None),
                           "template": a.name_template}, profile)
     fetch_gap = a.fetch_gap if a.fetch_gap is not None else 10
+    workers = min(4, max(1, a.workers or 1))
     if a.dry_run:
         cmd_dryrun(a.urls, a.max, cfg["lang"])
         return
@@ -1498,7 +1589,7 @@ def main():
             ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
             layout=cfg["layout"], template=cfg["template"], pdf=a.pdf,
             proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile,
-            fetch_gap=fetch_gap)
+            fetch_gap=fetch_gap, workers=workers)
 
 
 if __name__ == "__main__":
