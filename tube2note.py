@@ -968,7 +968,7 @@ def _cache_path(vid, lg, auto=False):
     return os.path.join(base, "tube2note", "subs", f"{vid}.{lg}.{kind}.vtt")
 
 
-def _get_vtt(vid, lg, auto, fmts, opener):
+def _get_vtt(vid, lg, auto, fmts, opener, fetch_gap=10):
     """Shared subtitle cache: same video is never downloaded twice (429-friendly).
     The key includes the track kind so a later manual upload replaces stale auto text."""
     p = _cache_path(vid, lg, auto)
@@ -977,7 +977,7 @@ def _get_vtt(vid, lg, auto, fmts, opener):
             return open(p, encoding="utf-8").read(), True
         except OSError:
             pass
-    time.sleep(random.uniform(5, 10))  # pace timedtext fetches only
+    time.sleep(random.uniform(1, max(1, fetch_gap)))  # pace timedtext fetches only
     vtt = fetch_vtt(fmts, opener)
     try:
         os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -990,7 +990,7 @@ def _get_vtt(vid, lg, auto, fmts, opener):
 def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cooldown=600,
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
             verbose=False, layout="single", template="", pdf=False,
-            proxy=None, cookiefile=None, since=None, profile=None):
+            proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10):
     if videos is None:
         videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
@@ -1114,7 +1114,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             text, last = None, None
             for _ in (1, 2):  # ponytail: 60s + ONE retry on 429; hot retries extend the ban
                 try:
-                    vtt, cached = _get_vtt(v["id"], lg, auto, fmts, ydl.urlopen)
+                    vtt, cached = _get_vtt(v["id"], lg, auto, fmts, ydl.urlopen, fetch_gap)
                     chaps = [(c.get("start_time") or 0, c.get("title") or "")
                              for c in (info.get("chapters") or []) if c.get("title")]
                     text = _join_paras(vtt_segments(vtt), ts, chaps or None).strip()
@@ -1433,6 +1433,7 @@ def main():
     ap.add_argument("--sleep", type=float, default=2.0, help="pause between videos (s)")
     ap.add_argument("--chunk", type=int, default=None, help="long break every N videos")
     ap.add_argument("--chunk-cooldown", type=int, default=None, help="break between chunks (s)")
+    ap.add_argument("--fetch-gap", type=int, default=None, help="max pause before subtitle fetch, seconds (default 10)")
     ap.add_argument("--throttle-cooldown", type=int, default=1800, help="break after 5 throttles in a row (s)")
     ap.add_argument("-d", "--dir", default=None, help="output folder (created if missing)")
     ap.add_argument("--layout", default=None, help="output layout: single, videos or tree")
@@ -1466,6 +1467,7 @@ def main():
                           "chunk_cooldown_min": (a.chunk_cooldown // 60
                                                  if a.chunk_cooldown is not None else None),
                           "template": a.name_template}, profile)
+    fetch_gap = a.fetch_gap if a.fetch_gap is not None else 10
     if a.dry_run:
         cmd_dryrun(a.urls, a.max, cfg["lang"])
         return
@@ -1487,7 +1489,8 @@ def main():
             cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
             ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
             layout=cfg["layout"], template=cfg["template"], pdf=a.pdf,
-            proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile)
+            proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile,
+            fetch_gap=fetch_gap)
 
 
 if __name__ == "__main__":
