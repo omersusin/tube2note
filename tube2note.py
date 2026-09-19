@@ -267,11 +267,12 @@ def _self_test():
     import tempfile
     td = tempfile.mkdtemp()
     os.environ["XDG_CACHE_HOME"] = td
-    assert _get_vtt("VIDX", "en", [{"url": "http://x", "ext": "vtt"}],
+    assert _get_vtt("VIDX", "en", False, [{"url": "http://x", "ext": "vtt"}],
                     lambda req: __import__("io").BytesIO(b"WEBVTT\n\n00:01.000 --> 00:02.000\nhi\n")) == \
         ("WEBVTT\n\n00:01.000 --> 00:02.000\nhi\n", False)
-    assert _get_vtt("VIDX", "en", [{"url": "http://x", "ext": "vtt"}],
+    assert _get_vtt("VIDX", "en", False, [{"url": "http://x", "ext": "vtt"}],
                     lambda req: 1 / 0) == ("WEBVTT\n\n00:01.000 --> 00:02.000\nhi\n", True)
+    assert _cache_path("V", "en", True) != _cache_path("V", "en", False)
     del os.environ["XDG_CACHE_HOME"]
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
@@ -391,11 +392,20 @@ def pick_sub(info, langs):
     return None, None, False
 
 
+def _make_req(url):
+    """yt-dlp Request when available (silences its urlopen deprecation), else stdlib."""
+    try:
+        from yt_dlp.networking.common import Request as YdlRequest
+        return YdlRequest(url, headers={"User-Agent": "Mozilla/5.0"})
+    except Exception:
+        return urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+
+
 def fetch_vtt(formats, opener=None):
     want = [f for f in formats if f.get("ext") == "vtt"] or formats
     # ponytail: ilk vtt'yi al, tum formatlari denemek gereksiz
     url = want[0]["url"]
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    req = _make_req(url)
     if opener is None:  # plain stdlib (tests, offline use)
         ctx = urllib.request.urlopen(req, timeout=20)
     else:  # yt-dlp handler: proxy, cookies, impersonation aware
@@ -596,7 +606,11 @@ def load_config():
         defaults = {}
     if not isinstance(profiles, dict):
         profiles = {}
-    return {"defaults": defaults, "profiles": profiles}
+    store = {"defaults": defaults, "profiles": profiles}
+    for k, v in raw.items():  # keep runtime keys like "last", "last:<profile>"
+        if k not in store:
+            store[k] = v
+    return store
 
 
 def save_config(store):
@@ -664,7 +678,8 @@ def cmd_setup(advanced=False):
 
 
 def tui():
-    cfg = resolve_config(profile=os.environ.get("YT2MD_PROFILE") or None)
+    prof = os.environ.get("YT2MD_PROFILE") or None
+    cfg = resolve_config(profile=prof)
     show_intro()
     if is_first_run():
         show_guide()
@@ -738,7 +753,7 @@ def tui():
             continue
         try:
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
-                    layout=lay, template=tmp, pdf=pdf, since=since)
+                    layout=lay, template=tmp, pdf=pdf, since=since, profile=prof)
         except KeyboardInterrupt:
             print("\nCancelled.")
         again = input("\nNew job? [Enter]=yes, q=quit > ").strip()
@@ -947,14 +962,16 @@ def md_to_pdf(md_path, pdf_path=None):
     return pdf_path
 
 
-def _cache_path(vid, lg):
+def _cache_path(vid, lg, auto=False):
     base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
-    return os.path.join(base, "tube2note", "subs", f"{vid}.{lg}.vtt")
+    kind = "auto" if auto else "man"
+    return os.path.join(base, "tube2note", "subs", f"{vid}.{lg}.{kind}.vtt")
 
 
-def _get_vtt(vid, lg, fmts, opener):
-    """Shared subtitle cache: same video is never downloaded twice (429-friendly)."""
-    p = _cache_path(vid, lg)
+def _get_vtt(vid, lg, auto, fmts, opener):
+    """Shared subtitle cache: same video is never downloaded twice (429-friendly).
+    The key includes the track kind so a later manual upload replaces stale auto text."""
+    p = _cache_path(vid, lg, auto)
     if os.path.exists(p):
         try:
             return open(p, encoding="utf-8").read(), True
@@ -973,7 +990,7 @@ def _get_vtt(vid, lg, fmts, opener):
 def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cooldown=600,
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
             verbose=False, layout="single", template="", pdf=False,
-            proxy=None, cookiefile=None, since=None):
+            proxy=None, cookiefile=None, since=None, profile=None):
     if videos is None:
         videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
@@ -1004,7 +1021,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                outdir=os.path.dirname(os.path.abspath(out)) or ".", lang=lang_str,
                max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown, layout=layout,
                template=template, ts=ts, split_words=split_words, sleep=sleep,
-               since=since, proxy=proxy, cookiefile=cookiefile)
+               since=since, proxy=proxy, cookiefile=cookiefile, profile=profile)
     print(f"{total} videos found", flush=True)
     if not videos:
         return
@@ -1097,7 +1114,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             text, last = None, None
             for _ in (1, 2):  # ponytail: 60s + ONE retry on 429; hot retries extend the ban
                 try:
-                    vtt, cached = _get_vtt(v["id"], lg, fmts, ydl.urlopen)
+                    vtt, cached = _get_vtt(v["id"], lg, auto, fmts, ydl.urlopen)
                     chaps = [(c.get("start_time") or 0, c.get("title") or "")
                              for c in (info.get("chapters") or []) if c.get("title")]
                     text = _join_paras(vtt_segments(vtt), ts, chaps or None).strip()
@@ -1251,7 +1268,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         print(f"Checkpoint: {ok} videos, {words} words -> {out} (total: {ndone}/{len(videos)})")
 
 
-def cmd_doctor():
+def cmd_doctor(proxy=None):
     """Environment diagnosis: versions, fonts, config, disk."""
     rows = []
     try:
@@ -1259,7 +1276,7 @@ def cmd_doctor():
         rows.append(["yt-dlp installed", yv.__version__])
     except Exception as e:
         rows.append(["yt-dlp installed", f"missing ({e})"])
-    latest, note = _pypi_latest("yt-dlp")
+    latest, note = _pypi_latest("yt-dlp", proxy)
     rows.append(["yt-dlp latest (PyPI)", latest + note])
     try:
         import fpdf
@@ -1285,7 +1302,7 @@ def cmd_doctor():
     print(table(["Check", "Result"], rows))
 
 
-def _pypi_latest(pkg):
+def _pypi_latest(pkg, proxy=None):
     """(version, note): weekly-cached PyPI lookup, never fatal."""
     cache = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
                          "tube2note", "pypi.json")
@@ -1298,7 +1315,12 @@ def _pypi_latest(pkg):
     try:
         req = urllib.request.Request(f"https://pypi.org/pypi/{pkg}/json",
                                      headers={"User-Agent": "tube2note-doctor"})
-        d2 = json.load(urllib.request.urlopen(req, timeout=15))
+        if proxy:
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+            d2 = json.load(opener.open(req, timeout=15))
+        else:
+            d2 = json.load(urllib.request.urlopen(req, timeout=15))
         ver = d2["info"]["version"]
         try:
             old = {}
@@ -1329,10 +1351,10 @@ def cmd_widget():
     print(f"Widget written to {dst} (needs Termux:Widget app).")
 
 
-def _save_last(**kw):
+def _save_last(profile=None, **kw):
     try:
         store = load_config()
-        store["last"] = kw
+        store["last:" + profile if profile else "last"] = kw
         save_config(store)
     except OSError:
         pass
@@ -1384,7 +1406,11 @@ def main():
         cmd_setup("--advanced" in sys.argv)
         return
     if len(sys.argv) > 1 and sys.argv[1] == "doctor":
-        cmd_doctor()
+        px = None
+        if "--proxy" in sys.argv:
+            i = sys.argv.index("--proxy")
+            px = sys.argv[i + 1] if i + 1 < len(sys.argv) else None
+        cmd_doctor(px)
         return
     if len(sys.argv) > 1 and sys.argv[1] == "widget":
         cmd_widget()
@@ -1444,7 +1470,8 @@ def main():
         cmd_dryrun(a.urls, a.max, cfg["lang"])
         return
     if a.resume_last:
-        last = load_config().get("last")
+        store = load_config()
+        last = (store.get("last:" + profile) if profile else None) or store.get("last")
         if not last or not last.get("urls"):
             ap.error("no saved job: run once first (resume info is stored automatically)")
         run_job(last["urls"], last.get("out", "tube2note.md"), last.get("lang", cfg["lang"]),
@@ -1460,7 +1487,7 @@ def main():
             cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
             ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
             layout=cfg["layout"], template=cfg["template"], pdf=a.pdf,
-            proxy=a.proxy, cookiefile=a.cookies)
+            proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile)
 
 
 if __name__ == "__main__":
