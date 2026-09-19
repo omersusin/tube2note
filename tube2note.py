@@ -1262,6 +1262,9 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             pass
     langs = [s.strip() for s in lang_str.split(",") if s.strip()]
     total = len(videos)
+    if transcribe and not os.environ.get("GEMINI_API_KEY", ""):
+        print("transcribe needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
+        return
     _save_last(urls=urls, out=os.path.basename(out),
                outdir=os.path.dirname(os.path.abspath(out)) or ".", lang=lang_str,
                max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown, layout=layout,
