@@ -12,6 +12,7 @@ Requires: pip install yt-dlp (no ffmpeg needed)
 """
 import argparse
 import datetime
+import glob
 import html
 import json
 import os
@@ -214,6 +215,9 @@ def _self_test():
         code = 429
     assert _is_throttle(E()) and not _is_throttle(ValueError())
     assert slug("PickY Audio!") == "picky-audio.md"
+    assert _md_line_kind("## Hello") == ("h2", "Hello")
+    assert _md_line_kind("- item") == ("bullet", "item")
+    assert _md_line_kind("| a | b |")[0] == "row"
     assert _merge(dict(DEFAULTS), {"defaults": {"lang": "en"}, "profiles": {"p": {"lang": "de"}}},
                   "p", {"chunk": 5}, {"YT2MD_LANG": "fr"}) == {**DEFAULTS, "lang": "fr", "chunk": 5}
     assert _merge(dict(DEFAULTS), {"defaults": {}, "profiles": {"p": {"lang": "de"}}},
@@ -622,6 +626,7 @@ def tui():
         yn = "y" if cfg["timestamps"] else "n"
         ts = input(f"Timestamps? [{yn}] > ").strip().lower()
         ts = cfg["timestamps"] if ts == "" else ts in ("y", "yes")
+        pdf = input("PDF too? [n] > ").strip().lower() in ("y", "yes")
         tmp = input(f"Name template [{cfg['template'] or 'layout default'}] > ").strip()
         tmp = tmp or cfg["template"]
         sp = input("Auto-split words for NotebookLM [0=off] > ").strip() or "0"
@@ -636,7 +641,7 @@ def tui():
             continue
         try:
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
-                    layout=lay, template=tmp)
+                    layout=lay, template=tmp, pdf=pdf)
         except KeyboardInterrupt:
             print("\nCancelled.")
         again = input("\nNew job? [Enter]=yes, q=quit > ").strip()
@@ -707,9 +712,81 @@ def _collection_override(root):
     return {k: data[k] for k in COLLECTION_KEYS if k in data}
 
 
+def _md_line_kind(line):
+    """Classify one markdown line for the PDF renderer (pure, testable)."""
+    s = line.rstrip("\n")
+    if s.startswith("## "):
+        return ("h2", s[3:].strip())
+    if s.startswith("# "):
+        return ("h1", s[2:].strip())
+    if s.strip() in ("---", "***"):
+        return ("rule", "")
+    if s.lstrip().startswith("- "):
+        return ("bullet", s.lstrip()[2:].strip())
+    if s.strip().startswith("|") and s.strip().endswith("|"):
+        return ("row", "  ".join(c.strip() for c in s.strip().strip("|").split("|")))
+    return ("para", s.strip())
+
+
+def _pdf_font(pdf):
+    """Unicode TTF if found (Turkish glyphs), else core helvetica."""
+    for p in ("/system/fonts/DroidSans.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+              "/data/data/com.termux/files/usr/share/fonts/DejaVuSans.ttf"):
+        if os.path.exists(p):
+            pdf.add_font("body", "", p)
+            try:
+                b = p.replace(".ttf", "-Bold.ttf")
+                pdf.add_font("body", "B", b if os.path.exists(b) else p)
+            except Exception:
+                pass
+            return "body"
+    return "helvetica"
+
+
+def md_to_pdf(md_path, pdf_path=None):
+    """Convert our Markdown to PDF. Needs fpdf2 (pip install fpdf2) — optional dep."""
+    try:
+        from fpdf import FPDF
+        from fpdf.enums import XPos, YPos
+    except ImportError:
+        raise SystemExit("PDF needs fpdf2: pip install fpdf2  (or pip install tube2note[pdf])")
+    pdf_path = pdf_path or os.path.splitext(md_path)[0] + ".pdf"
+    pdf = FPDF()
+    pdf.set_auto_page_break(True, margin=20)
+    font = _pdf_font(pdf)
+    pdf.add_page()
+    pdf.set_font(font, size=11)
+    # ponytail: fpdf2 2.8 leaves the cursor at the right margin after
+    # multi_cell; force LMARGIN or the next line has zero width and crashes.
+    mc = lambda h, t, s=11, st="": (pdf.set_font(font, st, s),
+                                    pdf.multi_cell(0, h, t, new_x=XPos.LMARGIN, new_y=YPos.NEXT))
+    for raw in open(md_path, encoding="utf-8").read().splitlines():
+        if not raw.strip():
+            pdf.ln(3)
+            continue
+        kind, text = _md_line_kind(raw)
+        if kind == "h1":
+            mc(8, text, 16, "B")
+            pdf.set_font(font, size=11)
+        elif kind == "h2":
+            mc(7, text, 13, "B")
+            pdf.set_font(font, size=11)
+        elif kind == "rule":
+            pdf.ln(2)
+            pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+            pdf.ln(4)
+        elif kind == "bullet":
+            mc(6, "• " + text)
+        else:
+            mc(6, text)
+    pdf.output(pdf_path)
+    return pdf_path
+
+
 def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cooldown=600,
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
-            verbose=False, layout="single", template=""):
+            verbose=False, layout="single", template="", pdf=False):
     if videos is None:
         videos, _ = expand(urls, max_n)
     if outdir and outdir != ".":
@@ -941,6 +1018,14 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         else:
             print("Upload to NotebookLM: add this file as a source.")
             print(dim("Cap is 500,000 words/file — use --split-words if bigger."))
+        if pdf:
+            base, _ = os.path.splitext(out)
+            for src in [out] + sorted(glob.glob(base + "_part*.md")):
+                try:
+                    print("PDF: " + md_to_pdf(src), flush=True)
+                except SystemExit as e:
+                    print(e)
+                    break
     else:
         dash_end()
         print(f"Checkpoint: {ok} videos, {words} words -> {out} (total: {ndone}/{len(videos)})")
@@ -991,6 +1076,16 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "setup":
         cmd_setup("--advanced" in sys.argv)
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "pdf":
+        if len(sys.argv) < 3:
+            print("Usage: tube2note.py pdf <file.md> [...]")
+            return
+        for f in sys.argv[2:]:
+            try:
+                print("PDF: " + md_to_pdf(f), flush=True)
+            except (OSError, SystemExit) as e:
+                print(f"! {f}: {e}")
+        return
     ap = argparse.ArgumentParser(description="YouTube -> single Markdown (NotebookLM feed)")
     ap.add_argument("urls", nargs="*", help="channel / playlist / video URLs")
     ap.add_argument("-o", "--out", default="tube2note.md")
@@ -1006,6 +1101,7 @@ def main():
     ap.add_argument("--name-template", default=None, help='per-video path template, e.g. "{channel}/{title} [{id}]"')
     ap.add_argument("--profile", default=None, help="config profile name (or YT2MD_PROFILE)")
     ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
+    ap.add_argument("--pdf", action="store_true", help="also write PDF next to the Markdown (needs fpdf2)")
     ap.add_argument("--tui", action="store_true", help="interactive mode (short command)")
     ap.add_argument("--verbose", action="store_true", help="scrolling log lines instead of the live dashboard")
     ap.add_argument("--dry-run", action="store_true", help="list + estimate only, download nothing")
@@ -1033,7 +1129,7 @@ def main():
     run_job(a.urls, a.out, cfg["lang"], a.max, a.sleep, a.fresh, cfg["chunk"],
             cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
             ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
-            layout=cfg["layout"], template=cfg["template"])
+            layout=cfg["layout"], template=cfg["template"], pdf=a.pdf)
 
 
 if __name__ == "__main__":
