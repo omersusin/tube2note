@@ -64,6 +64,8 @@ CLI flags > `YT2MD_*` env vars > `--profile` > per-folder `.yt2md.json` > `setup
 
 **Big channels?** Use `--max`, `--chunk 25`, longer `--chunk-cooldown`, or run overnight. Resume anytime.
 
+**`yt` command missing/conflicting?** `pip install tube2note` also installs the short `yt` command. If you have the `yt-project` package, the last-installed one wins — uninstall the other or call `tube2note` (full name always works).
+
 **Found a bug / want a feature?** Open an issue — templates for both are included.
 
 ## License

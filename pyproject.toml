@@ -9,8 +9,7 @@ description = "YouTube channels, playlists and videos to a single Markdown file 
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-keywords = ["youtube", "transcript", "markdown", "notebooklm", "cli", "rag"]
-dependencies = ["yt-dlp"]
+keywords = ["youtube", "transcript", "markdown", "notebooklm", "cli", "rag"]dependencies = ["yt-dlp"]
 
 [project.optional-dependencies]
 pdf = ["fpdf2"]
@@ -25,6 +24,12 @@ classifiers = [
 
 [project.scripts]
 tube2note = "tube2note:main"
+yt = "tube2note:main"
+
+[project.urls]
+Homepage = "https://github.com/omersusin/tube2note"
+Repository = "https://github.com/omersusin/tube2note"
+Issues = "https://github.com/omersusin/tube2note/issues"
 
 [tool.setuptools]
 py-modules = ["tube2note"]

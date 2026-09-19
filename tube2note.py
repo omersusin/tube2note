@@ -214,6 +214,9 @@ def _self_test():
     class E(Exception):
         code = 429
     assert _is_throttle(E()) and not _is_throttle(ValueError())
+    assert _is_throttle(Exception("HTTP Error 429: Too Many Requests"))
+    assert _is_throttle(Exception("ERROR: [youtube] x: HTTP Error 429"))
+    assert not _is_throttle(OSError("disk full"))
     assert slug("PickY Audio!") == "picky-audio.md"
     assert _md_line_kind("## Hello") == ("h2", "Hello")
     assert _md_line_kind("- item") == ("bullet", "item")
@@ -313,17 +316,26 @@ def pick_sub(info, langs):
     return None, None, False
 
 
-def fetch_vtt(formats):
+def fetch_vtt(formats, opener=None):
     want = [f for f in formats if f.get("ext") == "vtt"] or formats
-    # ponytail: take the first vtt, trying every format is waste
+    # ponytail: ilk vtt'yi al, tum formatlari denemek gereksiz
     url = want[0]["url"]
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=20) as r:
+    if opener is None:  # plain stdlib (tests, offline use)
+        ctx = urllib.request.urlopen(req, timeout=20)
+    else:  # yt-dlp handler: proxy, cookies, impersonation aware
+        ctx = opener(req)
+    with ctx as r:
         return r.read().decode("utf-8", errors="ignore")
 
 
 def _is_throttle(e):
-    return getattr(e, "code", None) in (429, 500, 502, 503)
+    # yt-dlp wraps HTTP errors in DownloadError/ExtractorError WITHOUT .code,
+    # but the message keeps "HTTP Error 429: ..." — check both.
+    if getattr(e, "code", None) in (429, 500, 502, 503):
+        return True
+    msg = str(e)
+    return "429" in msg or "Too Many Requests" in msg
 
 
 def _countdown(secs, label, tick=None):
@@ -370,8 +382,17 @@ DEFAULT_TEMPLATES = {
 }
 
 
+_WARNED_FIELDS = set()
+
+
 def render_template(tmpl, fields):
-    """Fill {field} placeholders; unknown fields become empty. Sanitize per segment."""
+    """Fill {field} placeholders; unknown fields become empty (warned once). Sanitize per segment."""
+    fields = fields or {}
+    unknown = set(re.findall(r"\{(\w+)\}", tmpl or "")) - set(fields)
+    new = unknown - _WARNED_FIELDS
+    if new:
+        _WARNED_FIELDS.update(new)
+        print(f"warning: unknown template field(s): {', '.join(sorted(new))} (left empty)", flush=True)
     rel = re.sub(r"\{(\w+)\}", lambda m: str(fields.get(m.group(1), "")), tmpl or "")
     segs = [sanitize_filename(p) for p in rel.split("/") if p.strip() and p.strip() != "."]
     rel = "/".join(segs)
@@ -650,8 +671,11 @@ def tui():
 
 
 def _frontmatter(title, wurl, channel, vid, lg, auto):
-    t = " ".join((title or vid).split()).replace('"', "'")
-    c = " ".join((channel or "unknown").split()).replace('"', "'")
+    def clean(s):
+        s = " ".join(str(s).split()).replace('"', "'").replace("\\", "/")
+        return s.lstrip("-?:,{}[]&*!|>#%@` ").strip() or "unknown"
+    t = clean(title or vid)
+    c = clean(channel or "unknown")
     return (f"---\ntitle: \"{t}\"\nsource: {wurl}\nchannel: \"{c}\"\n"
             f"video_id: {vid}\nlanguage: {lg}{' (auto)' if auto else ''}\n---\n\n")
 
@@ -786,7 +810,8 @@ def md_to_pdf(md_path, pdf_path=None):
 
 def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cooldown=600,
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
-            verbose=False, layout="single", template="", pdf=False):
+            verbose=False, layout="single", template="", pdf=False,
+            proxy=None, cookiefile=None):
     if videos is None:
         videos, _ = expand(urls, max_n)
     if outdir and outdir != ".":
@@ -854,6 +879,10 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True,
                 "writesubtitles": False, "socket_timeout": 20,
                 "subtitlesformat": "vtt/best"}
+    if proxy:
+        ydl_opts["proxy"] = proxy
+    if cookiefile:
+        ydl_opts["cookiefile"] = os.path.expanduser(cookiefile)
     with YoutubeDL(ydl_opts) as ydl:
         for i, v in enumerate(videos, 1):
             if v["id"] in done:
@@ -874,6 +903,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             try:
                 info = ydl.extract_info(v["url"], download=False)
             except Exception as e:
+                if getattr(e, "errno", None) == 28:
+                    raise
                 if verbose:
                     log(f"  ! skipped: {e}")
                 skip.append((v["title"], v["url"], str(e)))
@@ -900,10 +931,12 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             for _ in (1, 2):  # ponytail: 60s + ONE retry on 429; hot retries extend the ban
                 try:
                     time.sleep(random.uniform(5, 10))
-                    text = vtt_to_text(fetch_vtt(fmts), ts).strip()
+                    text = vtt_to_text(fetch_vtt(fmts, ydl.urlopen), ts).strip()
                     break
                 except Exception as e:
                     last = e
+                    if getattr(e, "errno", None) == 28:
+                        raise
                     if not _is_throttle(e):
                         break
                     status = "429: 60s break + single retry"
@@ -929,11 +962,15 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 skip.append((title, wurl, "subtitle too short"))
                 consec, status = 0, "subtitle too short"
                 continue
-            fout.write(f"## {i}. {title}\n\n- Source: {wurl}\n"
-                       f"- Video ID: {v['id']}\n- Subtitle lang: {lg}{' (auto)' if auto else ''}\n\n{text}\n\n---\n\n")
-            fout.flush()
-            dlog.write(v["id"] + "\n")
-            dlog.flush()
+            try:
+                fout.write(f"## {i}. {title}\n\n- Source: {wurl}\n"
+                           f"- Video ID: {v['id']}\n- Subtitle lang: {lg}{' (auto)' if auto else ''}\n\n{text}\n\n---\n\n")
+                fout.flush()
+                dlog.write(v["id"] + "\n")
+                dlog.flush()
+            except OSError as e:
+                print(red(f"  ! FATAL disk/IO error, stopping: {e}"))
+                raise SystemExit(1)
             ok += 1
             nwords = len(text.split())
             words += nwords
@@ -1102,6 +1139,8 @@ def main():
     ap.add_argument("--profile", default=None, help="config profile name (or YT2MD_PROFILE)")
     ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
     ap.add_argument("--pdf", action="store_true", help="also write PDF next to the Markdown (needs fpdf2)")
+    ap.add_argument("--proxy", default=None, help="proxy URL for all requests (yt-dlp syntax, e.g. socks5://127.0.0.1:1080)")
+    ap.add_argument("--cookies", default=None, help="Netscape cookies.txt file (helps logged-in/age-gated content)")
     ap.add_argument("--tui", action="store_true", help="interactive mode (short command)")
     ap.add_argument("--verbose", action="store_true", help="scrolling log lines instead of the live dashboard")
     ap.add_argument("--dry-run", action="store_true", help="list + estimate only, download nothing")
@@ -1129,7 +1168,8 @@ def main():
     run_job(a.urls, a.out, cfg["lang"], a.max, a.sleep, a.fresh, cfg["chunk"],
             cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
             ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
-            layout=cfg["layout"], template=cfg["template"], pdf=a.pdf)
+            layout=cfg["layout"], template=cfg["template"], pdf=a.pdf,
+            proxy=a.proxy, cookiefile=a.cookies)
 
 
 if __name__ == "__main__":
