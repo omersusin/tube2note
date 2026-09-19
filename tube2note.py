@@ -231,6 +231,24 @@ def _self_test():
     assert render_template("{channel}/{title} [{id}]", {"channel": "C", "title": "T", "id": "ID1"}) == "C/T [ID1].md"
     assert render_template("{nope}/x", {"a": "b"}) == "x.md"
     assert _unique_path("a/b.md", "ID1", {"a/b.md"}) == "a/b_ID1.md"
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
+        tf.write('---\ntitle: "X"\nvideo_id: VID1\n---\n')
+    assert _existing_vid(tf.name) == "VID1"
+    assert _existing_vid(tf.name + ".missing") is None
+    os.unlink(tf.name)
+    d2 = tempfile.mkdtemp()
+    p2 = os.path.join(d2, "s.skip")
+    open(p2, "w", encoding="utf-8").write(
+        json.dumps({"title": "Yeni Sarki | Official Video",
+                    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "reason": "x"}) + "\n"
+        "A | B | https://www.youtube.com/watch?v=DXhiKe37WLU | nope\n")
+    assert _skip_map(p2) == {"dQw4w9WgXcQ": "x", "DXhiKe37WLU": "nope"}
+    out, lim = [], 3
+    _flatten(None, {"_type": "playlist",
+                    "entries": [{"id": f"ABCDEFGHIJ{i}", "title": f"T{i}"} for i in range(5)]},
+             out, lim)
+    assert len(out) == 3 and out[0]["id"] == "ABCDEFGHIJ0"
     assert "50%" in bar(0.5) and bar(2.0).startswith("[█")
     assert "Name" in table(["Name", "Val"], [["a", "1"]])
     assert "tube2note" in panel("tube2note", ["x"])
@@ -247,22 +265,25 @@ def _self_test():
     print("self-test ok")
 
 
-def _flatten(ydl, info, depth=0):
-    """Channel -> tabs (Videos/Shorts/Live) -> videos: flatten up to two levels."""
+def _flatten(ydl, info, out, limit, depth=0):
+    """Channel -> tabs (Videos/Shorts/Live) -> videos, stopping at limit (so --max saves time)."""
+    if len(out) >= limit:
+        return
     entries = info.get("entries")
     if info.get("_type") not in ("playlist", "multi_video", "compat_batch") or not entries:
         vid = info.get("id") or ""
         if len(vid) == 11:  # video IDs are 11 chars; channels (UC..) / playlists (PL..) are not
-            return [{"id": vid, "title": info.get("title") or vid,
-                     "channel": info.get("channel") or info.get("uploader"),
-                     "url": f"https://www.youtube.com/watch?v={vid}"}]
-        return []
-    out = []
+            out.append({"id": vid, "title": info.get("title") or vid,
+                        "channel": info.get("channel") or info.get("uploader"),
+                        "url": f"https://www.youtube.com/watch?v={vid}"})
+        return
     for e in entries:
+        if len(out) >= limit:
+            return
         if e is None:
             continue
         if e.get("entries"):
-            out.extend(_flatten(ydl, e, depth + 1))
+            _flatten(ydl, e, out, limit, depth + 1)
         elif e.get("ie_key") == "Youtube" or len(e.get("id", "")) == 11:
             vid = e.get("id")
             out.append({"id": vid, "title": e.get("title") or vid,
@@ -274,8 +295,7 @@ def _flatten(ydl, info, depth=0):
             except Exception:
                 continue
             if sub:
-                out.extend(_flatten(ydl, sub, depth + 1))
-    return out
+                _flatten(ydl, sub, out, limit, depth + 1)
 
 
 def expand(urls, max_n):
@@ -292,7 +312,7 @@ def expand(urls, max_n):
                 continue
             if hint is None and len(urls) == 1 and info.get("title"):
                 hint = info.get("title")
-            out.extend(_flatten(ydl, info))
+            _flatten(ydl, info, out, max_n)
             if len(out) >= max_n:
                 break
     # dedupe in case the same video came from two lists
@@ -680,6 +700,21 @@ def _frontmatter(title, wurl, channel, vid, lg, auto):
             f"video_id: {vid}\nlanguage: {lg}{' (auto)' if auto else ''}\n---\n\n")
 
 
+def _existing_vid(path):
+    """Read video_id from an existing per-video file's frontmatter (None if unknown)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for i, ln in enumerate(f):
+                if i > 12:
+                    break
+                m = re.match(r"video_id:\s*(\S+)", ln)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return None
+
+
 def _unique_path(vp, vid, used):
     """Disambiguate slug collisions: second same-named file gets _<video_id>."""
     if vp in used:
@@ -697,15 +732,27 @@ def _count_lines(path):
 
 
 def _skip_map(skip_log):
-    """Parse 'title | url | reason' lines into {video_id_or_url: reason}."""
+    """Parse skip lines into {video_id_or_url: reason}. JSON first, legacy 'a | b | c' via right-split."""
     m = {}
-    if os.path.exists(skip_log):
-        for ln in open(skip_log, encoding="utf-8"):
-            parts = [p.strip() for p in ln.split(" | ")]
-            if len(parts) == 3:
-                t, u, s = parts
-                r = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", u)
-                m[r.group(1) if r else u] = s
+    try:
+        lines = open(skip_log, encoding="utf-8")
+    except OSError:
+        return m
+    with lines:
+        for ln in lines:
+            s = ln.strip()
+            if not s:
+                continue
+            try:
+                d = json.loads(s)
+                t, u, r = d.get("title", ""), d.get("url", ""), d.get("reason", "")
+            except (ValueError, AttributeError):
+                parts = [p.strip() for p in s.rsplit(" | ", 2)]
+                if len(parts) != 3:
+                    continue
+                t, u, r = parts
+            m2 = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", u or "")
+            m[m2.group(1) if m2 else u] = r
     return m
 
 
@@ -986,6 +1033,11 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                           "lang": lg}
                 vp = _unique_path(os.path.join(root, render_template(
                     template or DEFAULT_TEMPLATES[layout], fields)), v["id"], used_paths)
+                if _existing_vid(vp) not in (None, v["id"]):
+                    # another session's different video owns this path: do not overwrite
+                    base, ext = os.path.splitext(vp)
+                    vp = f"{base}_{v['id']}{ext}"
+                    used_paths.add(vp)
                 os.makedirs(os.path.dirname(vp), exist_ok=True)
                 with open(vp, "w", encoding="utf-8") as vf:
                     vf.write(_frontmatter(title, wurl, v.get("channel") or info.get("channel"),
@@ -996,7 +1048,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     dash_update(todo, todo, "done", ok, len(skip), words, t0)
     dash_end()
     for t, u, s in skip:
-        slog.write(f"{t} | {u} | {s}\n")
+        slog.write(json.dumps({"title": t, "url": u, "reason": s}, ensure_ascii=False) + "\n")
     fout.close()
     dlog.close()
     slog.close()
@@ -1035,7 +1087,14 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 with open(out, "a", encoding="utf-8") as f:
                     f.write("\n## Skipped\n\n")
                     for ln in open(skip_log, encoding="utf-8"):
-                        f.write(f"- {ln}")
+                        s = ln.strip()
+                        if not s:
+                            continue
+                        try:
+                            d = json.loads(s)
+                            f.write(f"- [{d.get('title', '?')}]({d.get('url', '')}) — {d.get('reason', '')}\n")
+                        except ValueError:
+                            f.write(f"- {s}\n")
         dash_end()
         print(panel("Done", [
             f"{green(str(ndone))} videos -> {out} ({nskip} skipped)",
