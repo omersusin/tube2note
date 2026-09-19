@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tube2note"
-version = "0.1.3"
+version = "0.1.4"
 description = "YouTube channels, playlists and videos to a single Markdown file for NotebookLM"
 readme = "README.md"
 requires-python = ">=3.10"
