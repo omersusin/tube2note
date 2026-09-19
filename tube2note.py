@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""yt2md: merge YouTube channel/playlist/video subtitles into a single .md file.
+"""tube2note: merge YouTube channel/playlist/video subtitles into Markdown files.
 Usage:
-  python3 yt2md.py -o notes.md "<playlist_url>" "<video_url>" ...
-  python3 yt2md.py -o channel.md --max 50 --lang tr,en "https://www.youtube.com/@channel/videos"
+  python3 tube2note.py -o notes.md "<playlist_url>" "<video_url>" ...
+  python3 tube2note.py -o channel.md --max 50 --lang tr,en "https://www.youtube.com/@channel/videos"
   yt                        # guided interactive mode
   yt setup                  # personalize defaults (folder, layout, ...)
-  python3 yt2md.py status [dir]   # progress table of saved collections
-  python3 yt2md.py --dry-run "<playlist_url>"  # preview only, no download
+  python3 tube2note.py status [dir]   # progress table of saved collections
+  python3 tube2note.py --dry-run "<playlist_url>"  # preview only, no download
 Input: channel / playlist / single video URLs. Output: one Markdown file to feed NotebookLM.
 Requires: pip install yt-dlp (no ffmpeg needed)
 """
@@ -226,7 +226,7 @@ def _self_test():
     assert _unique_path("a/b.md", "ID1", {"a/b.md"}) == "a/b_ID1.md"
     assert "50%" in bar(0.5) and bar(2.0).startswith("[█")
     assert "Name" in table(["Name", "Val"], [["a", "1"]])
-    assert "yt2md" in panel("yt2md", ["x"])
+    assert "tube2note" in panel("tube2note", ["x"])
     assert YT_RE.search("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
     assert not YT_RE.search("https://example.com/foo")
     d = _render_dash(1, 2, "hello world, this title is quite long", 1, 0, 10, time.time())
@@ -341,7 +341,7 @@ def _countdown(secs, label, tick=None):
         time.sleep(min(5, left))
 
 
-def slug(s, fallback="youtube_notes"):
+def slug(s, fallback="tube2note"):
     s = re.sub(r"[^a-z0-9]+", "-", sanitize_filename(s, "").lower()).strip("-")
     return (s[:60] or fallback) + ".md"
 
@@ -438,7 +438,7 @@ YT_RE = re.compile(r"(youtube\.com/(watch|shorts|playlist|@|channel/|c/|user/|li
 
 
 def show_intro():
-    print(panel("yt2md — YouTube to NotebookLM", [
+    print(panel("tube2note — YouTube to NotebookLM", [
         "Turn a channel, playlist or videos into ONE Markdown file.",
         "",
         "  1. Paste link(s)      2. Check the auto-detected summary",
@@ -534,7 +534,7 @@ def cmd_setup(advanced=False):
     """Personalize: 3 sticky defaults (folder, layout, language); pacing under --advanced."""
     store = load_config()
     cfg = _merge(dict(DEFAULTS), store, None, {}, {})
-    print(panel("Personalize yt2md", ["CLI flags and YT2MD_* env vars always win over these."]))
+    print(panel("Personalize tube2note", ["CLI flags and YT2MD_* env vars always win over these."]))
     cfg["outdir"] = input(f"Default folder [{cfg['outdir']}] > ").strip() or cfg["outdir"]
     lay = input(f"Output layout (single/videos/tree) [{cfg['layout']}] > ").strip().lower() or cfg["layout"]
     cfg["layout"] = lay if lay in ("single", "videos", "tree") else "single"
@@ -993,7 +993,7 @@ def main():
         return
     ap = argparse.ArgumentParser(description="YouTube -> single Markdown (NotebookLM feed)")
     ap.add_argument("urls", nargs="*", help="channel / playlist / video URLs")
-    ap.add_argument("-o", "--out", default="youtube_notes.md")
+    ap.add_argument("-o", "--out", default="tube2note.md")
     ap.add_argument("--lang", default=None, help="subtitle language priority, comma separated")
     ap.add_argument("--max", type=int, default=100, help="max number of videos")
     ap.add_argument("--sleep", type=float, default=2.0, help="pause between videos (s)")

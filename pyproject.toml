@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "yt2md"
+name = "tube2note"
 version = "0.1.0"
 description = "YouTube channels, playlists and videos to a single Markdown file for NotebookLM"
 readme = "README.md"
@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 [project.scripts]
-yt2md = "yt2md:main"
+tube2note = "tube2note:main"
 
 [tool.setuptools]
-py-modules = ["yt2md"]
+py-modules = ["tube2note"]

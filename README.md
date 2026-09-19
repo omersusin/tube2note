@@ -1,18 +1,18 @@
-# yt2md — YouTube → Markdown for NotebookLM
+# tube2note — YouTube → Markdown for NotebookLM
 
 Turn a YouTube channel, playlist, or list of videos into **one Markdown file** (or a folder of them) ready to feed NotebookLM / any RAG pipeline. Single file, zero-install besides `yt-dlp`, resumable, polite to YouTube's rate limits.
 
 ```bash
 pip install yt-dlp
-python3 yt2md.py -o channel.md "https://www.youtube.com/@SomeChannel/videos"
+python3 tube2note.py -o channel.md "https://www.youtube.com/@SomeChannel/videos"
 # or guided mode:
-python3 yt2md.py
+python3 tube2note.py
 ```
 
 ## Why not just paste YouTube links into NotebookLM?
 
 - NotebookLM caps YouTube imports (~100 videos) and needs caption files per video.
-- yt2md merges everything into Markdown sources you control: one file per 500k-word cap, timestamps, per-video files, resume after interruptions.
+- tube2note merges everything into Markdown sources you control: one file per 500k-word cap, timestamps, per-video files, resume after interruptions.
 
 ## Features
 
@@ -29,11 +29,11 @@ python3 yt2md.py
 ## Quickstart
 
 ```bash
-git clone <repo-url> && cd yt2md
+git clone <repo-url> && cd tube2note
 pip install yt-dlp
-python3 yt2md.py -o notes.md "<playlist_url>" "<video_url>" ...
-python3 yt2md.py -o channel.md --max 200 --layout tree -d ./out "https://www.youtube.com/@SomeChannel/videos"
-yt2md status ./out
+python3 tube2note.py -o notes.md "<playlist_url>" "<video_url>" ...
+python3 tube2note.py -o channel.md --max 200 --layout tree -d ./out "https://www.youtube.com/@SomeChannel/videos"
+tube2note status ./out
 ```
 
 ## NotebookLM limits (verified 2026)
@@ -44,7 +44,7 @@ yt2md status ./out
 
 ## FAQ
 
-**HTTP 429?** YouTube throttles sustained subtitle downloads. yt2md slows down automatically (chunks, cooldowns). If throttled hard: stop, wait ~1h (retries extend the ban), resume — progress is saved.
+**HTTP 429?** YouTube throttles sustained subtitle downloads. tube2note slows down automatically (chunks, cooldowns). If throttled hard: stop, wait ~1h (retries extend the ban), resume — progress is saved.
 
 **No subtitles for a video?** Skipped and listed at the end (`## Skipped`) + in `INDEX.md`.
 
