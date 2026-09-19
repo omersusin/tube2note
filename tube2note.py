@@ -259,6 +259,8 @@ def _self_test():
     assert render_template("{channel}/{title} [{id}]", {"channel": "C", "title": "T", "id": "ID1"}) == "C/T [ID1].md"
     assert render_template("{nope}/x", {"a": "b"}) == "x.md"
     assert _unique_path("a/b.md", "ID1", {"a/b.md"}) == "a/b_ID1.md"
+    assert _clean_text("eee hello um world world") == "hello world"
+    assert _clean_text("good. Bad! Really? Yes.") == "good.\nBad!\nReally?\nYes."
     b = Bucket(rate=10, capacity=2)
     t = time.time()
     b.wait()
@@ -619,11 +621,12 @@ def show_guide():
 
 CONFIG_PATH = os.path.expanduser("~/.config/yt2md/config.json")
 DEFAULTS = {"outdir": ".", "layout": "single", "timestamps": False, "chunk": 50,
-            "chunk_cooldown_min": 10, "lang": "tr,en", "template": ""}
+            "chunk_cooldown_min": 10, "lang": "tr,en", "template": "", "clean": True}
 
 ENV_MAP = {"outdir": "YT2MD_OUTDIR", "layout": "YT2MD_LAYOUT", "lang": "YT2MD_LANG",
            "chunk": "YT2MD_CHUNK", "timestamps": "YT2MD_TIMESTAMPS",
-           "chunk_cooldown_min": "YT2MD_COOLDOWN_MIN", "template": "YT2MD_TEMPLATE"}
+           "chunk_cooldown_min": "YT2MD_COOLDOWN_MIN", "template": "YT2MD_TEMPLATE",
+           "clean": "YT2MD_CLEAN"}
 
 
 def load_config():
@@ -670,8 +673,9 @@ def _merge(base, store, profile, flags, env):
             cfg[key] = max(0, int(cfg[key]))
         except (ValueError, TypeError):
             cfg[key] = base[key]
-    if isinstance(cfg.get("timestamps"), str):
-        cfg["timestamps"] = cfg["timestamps"].lower() in ("1", "y", "yes", "true")
+    for key in ("timestamps", "clean"):
+        if isinstance(cfg.get(key), str):
+            cfg[key] = cfg[key].lower() in ("1", "y", "yes", "true")
     if cfg.get("layout") not in ("single", "videos", "tree"):
         cfg["layout"] = base["layout"]
     return cfg
@@ -775,6 +779,8 @@ def tui():
         yn = "y" if cfg["timestamps"] else "n"
         ts = input(f"Timestamps? [{yn}] > ").strip().lower()
         ts = cfg["timestamps"] if ts == "" else ts in ("y", "yes")
+        cl = input(f"Cleaning? [{'y' if cfg['clean'] else 'n'}] > ").strip().lower()
+        cl = cfg["clean"] if cl == "" else cl in ("y", "yes")
         pdf = input("PDF too? [n] > ").strip().lower() in ("y", "yes")
         tmp = input(f"Name template [{cfg['template'] or 'layout default'}] > ").strip()
         tmp = tmp or cfg["template"]
@@ -795,7 +801,8 @@ def tui():
             continue
         try:
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
-                    layout=lay, template=tmp, pdf=pdf, since=since, profile=prof, workers=wk)
+                    layout=lay, template=tmp, pdf=pdf, since=since, profile=prof, workers=wk,
+                    clean=cl)
         except KeyboardInterrupt:
             print("\nCancelled.")
         again = input("\nNew job? [Enter]=yes, q=quit > ").strip()
@@ -1029,7 +1036,35 @@ def _get_vtt(vid, lg, auto, fmts, opener, fetch_gap=10):
     return vtt, False
 
 
-def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap):
+FILLER_RE = re.compile(r"\b(um|uh|er|ah|mm|hmm|eee|ee|ıı)\b", re.IGNORECASE)
+DUP_RE = re.compile(r"\b(.+?)(\s+\1\b)+", re.IGNORECASE)
+ABBR_RE = re.compile(r"\b(Mr|Mrs|Dr|Jr|St)\.")
+NUMDOT_RE = re.compile(r"(\d)\.(\d)")
+SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-ZİŞĞÜÖÇ0-9\"“])")
+
+
+def _clean_text(text):
+    """Cheap transcript cleanup: fillers, repeated phrases, one sentence per line."""
+    out = []
+    for para in text.split("\n\n"):
+        tag, body = "", para
+        m = re.match(r"(\[\d+:?\d*:\d+\]\s*)", body)
+        if m:
+            tag, body = m.group(1), body[m.end():]
+        body = FILLER_RE.sub("", body)
+        prev = None
+        while prev != body:
+            prev, body = body, DUP_RE.sub(r"\1", body)
+        body = ABBR_RE.sub(r"\1<<prd>>", body)
+        body = NUMDOT_RE.sub(r"\1<<prd>>\2", body)
+        sents = [s.replace("<<prd>>", ".").strip(" ,") for s in SENT_SPLIT_RE.split(body)]
+        sents = [re.sub(r"\s{2,}", " ", s).strip() for s in sents if s.strip()]
+        if sents:
+            out.append(tag + "\n".join(sents))
+    return "\n\n".join(out)
+
+
+def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True):
     """One video, network only, never raises (except disk-full).
     Returns dict with stage: extract|subs|fetch|ok."""
     res = {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
@@ -1059,6 +1094,8 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap):
                     vtt, cached = _get_vtt(v["id"], lg, auto, fmts, ydl.urlopen,
                                           0 if bucket is not None else fetch_gap)
                     res["text"] = _join_paras(vtt_segments(vtt), ts, res["chapters"] or None).strip()
+                    if clean:
+                        res["text"] = _clean_text(res["text"])
                     res["cached"] = cached
                     res["stage"] = "ok"
                     return res
@@ -1081,14 +1118,14 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap):
         return res
 
 
-def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap):
+def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True):
     """Yield (i, v, res) in submission order; purely serial when workers<=1."""
     if workers <= 1:
         for i, v in work:
-            yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap)
+            yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap, clean)
         return
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap))
+        futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap, clean))
                 for i, v in work]
         for i, v, fu in futs:
             try:
@@ -1107,7 +1144,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
             verbose=False, layout="single", template="", pdf=False,
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
-            workers=1):
+            workers=1, clean=True):
     if videos is None:
         videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
@@ -1190,7 +1227,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     if workers > 1:
         print(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
     with YoutubeDL(ydl_opts) as ydl:
-        for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap):
+        for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean):
             if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
                 if verbose:
                     log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
@@ -1536,6 +1573,8 @@ def main():
     ap.add_argument("-d", "--dir", default=None, help="output folder (created if missing)")
     ap.add_argument("--layout", default=None, help="output layout: single, videos or tree")
     ap.add_argument("--timestamps", action="store_true", default=None, help="keep [MM:SS] markers in transcripts")
+    ap.add_argument("--clean", dest="clean", action="store_true", default=None, help="clean transcripts (default on)")
+    ap.add_argument("--no-clean", dest="clean", action="store_false", help="keep raw transcripts")
     ap.add_argument("--since", default=None, help="only videos published on/after YYYY-MM-DD")
     ap.add_argument("--resume-last", action="store_true", help="re-run the last saved collection job")
     ap.add_argument("--name-template", default=None, help='per-video path template, e.g. "{channel}/{title} [{id}]"')
@@ -1564,7 +1603,7 @@ def main():
                           "chunk": a.chunk, "timestamps": a.timestamps,
                           "chunk_cooldown_min": (a.chunk_cooldown // 60
                                                  if a.chunk_cooldown is not None else None),
-                          "template": a.name_template}, profile)
+                          "template": a.name_template, "clean": a.clean}, profile)
     fetch_gap = a.fetch_gap if a.fetch_gap is not None else 10
     workers = min(4, max(1, a.workers or 1))
     if a.dry_run:
@@ -1589,7 +1628,7 @@ def main():
             ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
             layout=cfg["layout"], template=cfg["template"], pdf=a.pdf,
             proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile,
-            fetch_gap=fetch_gap, workers=workers)
+            fetch_gap=fetch_gap, workers=workers, clean=cfg["clean"])
 
 
 if __name__ == "__main__":
