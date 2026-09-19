@@ -20,6 +20,7 @@ import random
 import re
 import shutil
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -260,6 +261,11 @@ def _self_test():
     assert render_template("{nope}/x", {"a": "b"}) == "x.md"
     assert _unique_path("a/b.md", "ID1", {"a/b.md"}) == "a/b_ID1.md"
     assert _clean_text("eee hello um world world") == "hello world"
+    try:
+        _gemini_transcribe(b"x", "audio/mp3", "en")
+        raise AssertionError("should need key")
+    except SystemExit as e:
+        assert "GEMINI_API_KEY" in str(e)
     assert _clean_text("good. Bad! Really? Yes.") == "good.\nBad!\nReally?\nYes."
     b = Bucket(rate=10, capacity=2)
     t = time.time()
@@ -819,6 +825,8 @@ def _frontmatter(title, wurl, channel, vid, lg, auto, meta=None):
     out = (f"---\ntitle: \"{t}\"\nsource: {wurl}\nchannel: \"{c}\"\n"
            f"video_id: {vid}\nlanguage: {lg}{' (auto)' if auto else ''}\n")
     if meta:
+        if meta.get("method"):
+            out += f"method: {meta['method']}\n"
         if meta.get("published"):
             out += f"published: {meta['published']}\n"
         if meta.get("duration") is not None:
@@ -1064,7 +1072,79 @@ def _clean_text(text):
     return "\n\n".join(out)
 
 
-def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True):
+AUDIO_MIMES = {"mp3": "audio/mp3", "wav": "audio/wav", "aac": "audio/aac",
+               "ogg": "audio/ogg", "flac": "audio/flac", "m4a": "audio/mp4",
+               "webm": "audio/webm"}
+AUDIO_MAX_BYTES = 18 * 1024 * 1024
+
+
+def _download_audio(vid, tmpdir):
+    """Audio-only download, no ffmpeg: returns (path, ext) or (None, reason)."""
+    import tempfile
+    out = os.path.join(tmpdir, vid + ".%(ext)s")
+    opts = {"quiet": True, "no_warnings": True, "skip_download": False,
+            "format": "bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+            "outtmpl": out, "socket_timeout": 30}
+    try:
+        with YoutubeDL(opts) as ydl:
+            ydl.download([f"https://www.youtube.com/watch?v={vid}"])
+    except Exception as e:
+        return None, str(e) or type(e).__name__
+    for f in os.listdir(tmpdir):
+        if f.startswith(vid + "."):
+            return os.path.join(tmpdir, f), f.rsplit(".", 1)[-1].lower()
+    return None, "audio file not found"
+
+
+def _gemini_transcribe(audio_bytes, mime, lang="en", model="gemini-2.0-flash"):
+    """Send audio to Gemini API, return verbatim transcript. Needs GEMINI_API_KEY."""
+    import base64
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        raise SystemExit("transcribe needs GEMINI_API_KEY (free at aistudio.google.com)")
+    body = json.dumps({
+        "contents": [{"parts": [
+            {"text": f"Transcribe this audio verbatim in {lang}. Output only the transcript text, no commentary."},
+            {"inline_data": {"mime_type": mime, "data": base64.b64encode(audio_bytes).decode()}}]}],
+        "generationConfig": {"temperature": 0.0}}).encode()
+    req = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}",
+        data=body, headers={"Content-Type": "application/json"})
+    try:
+        resp = json.load(urllib.request.urlopen(req, timeout=120))
+    except Exception as e:
+        raise RuntimeError(f"Gemini API error: {e}")
+    try:
+        return resp["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(f"Gemini API unexpected response: {str(resp)[:200]}")
+
+
+def _try_transcribe(vid, lang, tmpdir):
+    """Captionless fallback: audio download + Gemini. Returns (text, note) or (None, reason)."""
+    import tempfile
+    path, ext = _download_audio(vid, tmpdir)
+    if path is None:
+        return None, ext
+    try:
+        if ext not in AUDIO_MIMES:
+            return None, f"audio format .{ext} not accepted by API"
+        if os.path.getsize(path) > AUDIO_MAX_BYTES:
+            return None, "audio too large for API (>18MB)"
+        with open(path, "rb") as f:
+            text = _gemini_transcribe(f.read(), AUDIO_MIMES[ext], lang)
+        if len(text) < 50:
+            return None, "transcript too short"
+        return text, "transcribed via Gemini"
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
+                transcribe=False, tmpdir=None):
     """One video, network only, never raises (except disk-full).
     Returns dict with stage: extract|subs|fetch|ok."""
     res = {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
@@ -1079,7 +1159,16 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True):
             res["channel"] = res["channel"] or info.get("channel")
             lg, fmts, auto = pick_sub(info, langs)
             if not fmts:
-                res["error"] = "no subtitles"
+                if transcribe:
+                    ttext, note = _try_transcribe(v["id"], langs[0] if langs else "en", tmpdir)
+                    if ttext is not None:
+                        res.update(lg=langs[0] if langs else "en", auto=False, text=ttext,
+                                   trans=True, stage="ok")
+                        res["meta"]["method"] = "gemini-transcribe"
+                        return res
+                    res["error"] = f"no subtitles ({note})"
+                else:
+                    res["error"] = "no subtitles"
                 res["stage"] = "subs"
                 return res
             res.update(lg=lg, auto=auto)
@@ -1118,15 +1207,17 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True):
         return res
 
 
-def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True):
+def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
+            transcribe=False, tmpdir=None):
     """Yield (i, v, res) in submission order; purely serial when workers<=1."""
     if workers <= 1:
         for i, v in work:
-            yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap, clean)
+            yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap, clean,
+                                    transcribe, tmpdir)
         return
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap, clean))
-                for i, v in work]
+        futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap,
+                                 clean, transcribe, tmpdir)) for i, v in work]
         for i, v, fu in futs:
             try:
                 yield i, v, fu.result()
@@ -1144,7 +1235,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
             verbose=False, layout="single", template="", pdf=False,
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
-            workers=1, clean=True):
+            workers=1, clean=True, transcribe=False):
     if videos is None:
         videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
@@ -1224,10 +1315,12 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         ydl_opts["cookiefile"] = os.path.expanduser(cookiefile)
     bucket = Bucket(rate=0.15, capacity=2) if workers > 1 else None
     work = [(i, v) for i, v in enumerate(videos, 1) if v["id"] not in done]
+    tmpdir = tempfile.mkdtemp(prefix="tube2note-")
     if workers > 1:
         print(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
     with YoutubeDL(ydl_opts) as ydl:
-        for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean):
+        for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap,
+                                clean, transcribe, tmpdir):
             if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
                 if verbose:
                     log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
@@ -1286,7 +1379,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 continue
             try:
                 fout.write(f"## {i}. {title}\n\n- Source: {wurl}\n"
-                           f"- Video ID: {v['id']}\n- Subtitle lang: {lg}{' (auto)' if auto else ''}\n\n{text}\n\n---\n\n")
+                           f"- Video ID: {v['id']}\n- Subtitle lang: {lg}"
+                           f"{' (transcribed)' if res.get('trans') else (' (auto)' if auto else '')}\n\n{text}\n\n---\n\n")
                 fout.flush()
                 dlog.write(v["id"] + "\n")
                 dlog.flush()
@@ -1328,6 +1422,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     dlog.close()
     slog.close()
     wlog.close()
+    shutil.rmtree(tmpdir, ignore_errors=True)
     if layout != "single":
         _write_index(root, videos, completed, words_by_id, skip_log)
         print(f"index: {os.path.join(root, 'INDEX.md')}", flush=True)
@@ -1581,6 +1676,7 @@ def main():
     ap.add_argument("--profile", default=None, help="config profile name (or YT2MD_PROFILE)")
     ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
     ap.add_argument("--pdf", action="store_true", help="also write PDF next to the Markdown (needs fpdf2)")
+    ap.add_argument("--transcribe", action="store_true", help="transcribe captionless videos via Gemini API (needs GEMINI_API_KEY)")
     ap.add_argument("--proxy", default=None, help="proxy URL for all requests (yt-dlp syntax, e.g. socks5://127.0.0.1:1080)")
     ap.add_argument("--cookies", default=None, help="Netscape cookies.txt file (helps logged-in/age-gated content)")
     ap.add_argument("--tui", action="store_true", help="interactive mode (short command)")
@@ -1628,7 +1724,8 @@ def main():
             ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
             layout=cfg["layout"], template=cfg["template"], pdf=a.pdf,
             proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile,
-            fetch_gap=fetch_gap, workers=workers, clean=cfg["clean"])
+            fetch_gap=fetch_gap, workers=workers, clean=cfg["clean"],
+            transcribe=a.transcribe)
 
 
 if __name__ == "__main__":
