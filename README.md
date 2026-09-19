@@ -1,40 +1,54 @@
-# tube2note — YouTube → Markdown for NotebookLM
+# tube2note — YouTube → Markdown (and PDF) for NotebookLM
 
-Turn a YouTube channel, playlist, or list of videos into **one Markdown file** (or a folder of them) ready to feed NotebookLM / any RAG pipeline. Single file, zero-install besides `yt-dlp`, resumable, polite to YouTube's rate limits.
+Turn a YouTube channel, playlist, or list of videos into **Markdown files** (or PDF) ready to feed NotebookLM / any RAG pipeline. Single file, no heavy dependencies, resumable, polite to YouTube's rate limits.
 
 ```bash
-pip install yt-dlp
-python3 tube2note.py -o channel.md "https://www.youtube.com/@SomeChannel/videos"
-# or guided mode:
-python3 tube2note.py
+pip install tube2note yt-dlp
+tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"
+# or guided mode (just type `tube2note`, answer a few questions):
+tube2note
 ```
+
+PDF too? `pip install "tube2note[pdf]"`, then add `--pdf` (or run `tube2note pdf existing.md`).
 
 ## Why not just paste YouTube links into NotebookLM?
 
 - NotebookLM caps YouTube imports (~100 videos) and needs caption files per video.
-- tube2note merges everything into Markdown sources you control: one file per 500k-word cap, timestamps, per-video files, resume after interruptions.
+- tube2note merges everything into sources you control: one file per 500k-word cap, timestamps, per-video files, resume after interruptions.
 
 ## Features
 
 - **Channel / playlist / video URLs** (auto-detected listing, Shorts/tabs handled)
-- **Guided TUI**: intro, first-run guide, auto-detected file name / video count / languages, confirm table
+- **Guided TUI**: intro, first-run guide, auto-detected file name / video count / languages, confirm table, live dashboard (bar + current video + stats)
 - **Anti-throttle engine**: chunks with breaks, jittered pacing, single retry on 429, long cooldown after 5 throttles in a row
 - **Resume**: `.done` log — Ctrl+C anytime, continue later; skip log reconciled every run
 - **Layouts**: `single` (one .md), `videos` (per-video files + `INDEX.md`), `tree` (`Channel/Video/transcript.md` + `INDEX.md` + YAML frontmatter)
-- **Name templates**: `--name-template "{channel}/{title} [{id}]"`
-- **Profiles + env**: `--profile X`, `YT2MD_*` vars, per-folder `.yt2md.json` overrides, `setup` wizard
-- **NotebookLM-aware**: timestamps option, `--split-words` auto-split under the 500k-word cap
+- **Name templates**: `--name-template "{channel}/{title} [{id}]"` (fields: channel, title, id, index, date, lang)
+- **Personalization**: `setup` wizard, named `--profile`s, `YT2MD_*` env vars, per-folder `.yt2md.json` overrides
+- **NotebookLM-aware**: `--timestamps`, `--split-words` auto-split under the 500k-word cap
+- **PDF export**: `--pdf` or `pdf file.md [...]` (needs `pip install "tube2note[pdf]"`)
 - **Status & dry-run**: `status [dir]` progress table, `--dry-run` estimate before downloading
 
 ## Quickstart
 
 ```bash
-git clone <repo-url> && cd tube2note
-pip install yt-dlp
-python3 tube2note.py -o notes.md "<playlist_url>" "<video_url>" ...
-python3 tube2note.py -o channel.md --max 200 --layout tree -d ./out "https://www.youtube.com/@SomeChannel/videos"
+pip install tube2note yt-dlp
+tube2note -o notes.md "<playlist_url>" "<video_url>" ...
+tube2note -o channel.md --max 200 --layout tree -d ./out "https://www.youtube.com/@SomeChannel/videos"
 tube2note status ./out
 ```
+
+From source:
+
+```bash
+git clone https://github.com/omersusin/tube2note && cd tube2note
+pip install yt-dlp
+python3 tube2note.py
+```
+
+## Configuration precedence
+
+CLI flags > `YT2MD_*` env vars > `--profile` > per-folder `.yt2md.json` > `setup` defaults > builtins.
 
 ## NotebookLM limits (verified 2026)
 
@@ -49,6 +63,8 @@ tube2note status ./out
 **No subtitles for a video?** Skipped and listed at the end (`## Skipped`) + in `INDEX.md`.
 
 **Big channels?** Use `--max`, `--chunk 25`, longer `--chunk-cooldown`, or run overnight. Resume anytime.
+
+**Found a bug / want a feature?** Open an issue — templates for both are included.
 
 ## License
 
