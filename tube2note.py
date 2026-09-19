@@ -175,9 +175,9 @@ def _fmt_ts(s):
     return f"{h}:{m:02d}:{s % 60:02d}" if h else f"{m:02d}:{s % 60:02d}"
 
 
-def vtt_to_text(vtt: str, ts: bool = False) -> str:
-    lines = []  # (start_secs, text)
-    start = 0.0
+def vtt_segments(vtt: str):
+    """Parse VTT into [(start_secs, text)] with back-to-back dupes dropped."""
+    segs, start = [], 0.0
     for block in vtt.splitlines():
         s = block.strip()
         if not s or s == "WEBVTT" or s.startswith("NOTE") or s.startswith("STYLE") or s.startswith("REGION"):
@@ -188,23 +188,46 @@ def vtt_to_text(vtt: str, ts: bool = False) -> str:
         if s.isdigit():
             continue
         s = TAG_RE.sub("", s)
-        s = html.unescape(s).replace(" ", " ").strip()
-        if s and (not lines or lines[-1][1] != s):  # drop back-to-back duplicates from auto captions
-            lines.append((start, s))
-    # join into paragraphs of ~20 lines so the flow stays readable
+        s = html.unescape(s).replace(" ", " ").strip()
+        if s and (not segs or segs[-1][1] != s):  # drop back-to-back duplicates from auto captions
+            segs.append((start, s))
+    return segs
+
+
+def _para_text(p, ts):
+    body = " ".join(t for _, t in p)
+    return f"[{_fmt_ts(p[0][0])}] {body}" if ts else body
+
+
+def _join_paras(segs, ts=False, chapters=None):
+    """Group segments into ~20-line paragraphs, or at the video's own chapter boundaries."""
+    if chapters:
+        ch = sorted(chapters)
+        buckets, idx = [[] for _ in ch], 0
+        for st, ln in segs:
+            while idx + 1 < len(ch) and st >= ch[idx + 1][0]:
+                idx += 1
+            buckets[idx].append((st, ln))
+        out = []
+        for (st0, title), b in zip(ch, buckets):
+            if not b:
+                continue
+            out.append(f"### {title}")
+            out += [_para_text(b[i:i + 20], ts) for i in range(0, len(b), 20)]
+        return "\n\n".join(out)
     paras, buf = [], []
-    for i, (st, ln) in enumerate(lines, 1):
-        buf.append((st, ln))
+    for i, seg in enumerate(segs, 1):
+        buf.append(seg)
         if i % 20 == 0:
             paras.append(buf)
             buf = []
     if buf:
         paras.append(buf)
-    out = []
-    for p in paras:
-        body = " ".join(t for _, t in p)
-        out.append(f"[{_fmt_ts(p[0][0])}] {body}" if ts else body)
-    return "\n\n".join(out)
+    return "\n\n".join(_para_text(p, ts) for p in paras)
+
+
+def vtt_to_text(vtt: str, ts: bool = False) -> str:
+    return _join_paras(vtt_segments(vtt), ts)
 
 
 def _self_test():
@@ -233,6 +256,23 @@ def _self_test():
     assert render_template("{channel}/{title} [{id}]", {"channel": "C", "title": "T", "id": "ID1"}) == "C/T [ID1].md"
     assert render_template("{nope}/x", {"a": "b"}) == "x.md"
     assert _unique_path("a/b.md", "ID1", {"a/b.md"}) == "a/b_ID1.md"
+    segs = vtt_segments("WEBVTT\n\n00:00.500 --> 00:02.000\nhello\n\n00:02.000 --> 00:04.000\nworld\n")
+    assert segs == [(0.5, "hello"), (2.0, "world")]
+    chtext = _join_paras([(10.0, "a"), (70.0, "b"), (130.0, "c")], False, [(0, "Intro"), (60, "Main")])
+    assert chtext.startswith("### Intro") and "### Main" in chtext and chtext.index("### Intro") < chtext.index("### Main")
+    assert _parse_since("2024-01-15") > 0 and _parse_since("nope") == 0
+    fm = _frontmatter("T", "u", "C", "ID", "en", False,
+                      {"published": "2024-01-01", "duration": 60, "views": 5, "description": "d"})
+    assert "published: 2024-01-01" in fm and "views: 5" in fm
+    import tempfile
+    td = tempfile.mkdtemp()
+    os.environ["XDG_CACHE_HOME"] = td
+    assert _get_vtt("VIDX", "en", [{"url": "http://x", "ext": "vtt"}],
+                    lambda req: __import__("io").BytesIO(b"WEBVTT\n\n00:01.000 --> 00:02.000\nhi\n")) == \
+        ("WEBVTT\n\n00:01.000 --> 00:02.000\nhi\n", False)
+    assert _get_vtt("VIDX", "en", [{"url": "http://x", "ext": "vtt"}],
+                    lambda req: 1 / 0) == ("WEBVTT\n\n00:01.000 --> 00:02.000\nhi\n", True)
+    del os.environ["XDG_CACHE_HOME"]
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
         tf.write('---\ntitle: "X"\nvideo_id: VID1\n---\n')
@@ -267,7 +307,14 @@ def _self_test():
     print("self-test ok")
 
 
-def _flatten(ydl, info, out, limit, depth=0):
+def _parse_since(s):
+    try:
+        return datetime.datetime.strptime(s, "%Y-%m-%d").timestamp()
+    except (ValueError, TypeError):
+        return 0
+
+
+def _flatten(ydl, info, out, limit, depth=0, since_ts=0):
     """Channel -> tabs (Videos/Shorts/Live) -> videos, stopping at limit (so --max saves time)."""
     if len(out) >= limit:
         return
@@ -275,9 +322,11 @@ def _flatten(ydl, info, out, limit, depth=0):
     if info.get("_type") not in ("playlist", "multi_video", "compat_batch") or not entries:
         vid = info.get("id") or ""
         if len(vid) == 11:  # video IDs are 11 chars; channels (UC..) / playlists (PL..) are not
-            out.append({"id": vid, "title": info.get("title") or vid,
-                        "channel": info.get("channel") or info.get("uploader"),
-                        "url": f"https://www.youtube.com/watch?v={vid}"})
+            ts = info.get("timestamp") or info.get("release_timestamp") or 0
+            if not (since_ts and ts and ts < since_ts):
+                out.append({"id": vid, "title": info.get("title") or vid,
+                            "channel": info.get("channel") or info.get("uploader"),
+                            "url": f"https://www.youtube.com/watch?v={vid}"})
         return
     for e in entries:
         if len(out) >= limit:
@@ -285,8 +334,11 @@ def _flatten(ydl, info, out, limit, depth=0):
         if e is None:
             continue
         if e.get("entries"):
-            _flatten(ydl, e, out, limit, depth + 1)
+            _flatten(ydl, e, out, limit, depth + 1, since_ts)
         elif e.get("ie_key") == "Youtube" or len(e.get("id", "")) == 11:
+            ts = e.get("timestamp") or e.get("release_timestamp") or 0
+            if since_ts and ts and ts < since_ts:
+                continue
             vid = e.get("id")
             out.append({"id": vid, "title": e.get("title") or vid,
                         "channel": e.get("channel") or e.get("uploader"),
@@ -297,12 +349,13 @@ def _flatten(ydl, info, out, limit, depth=0):
             except Exception:
                 continue
             if sub:
-                _flatten(ydl, sub, out, limit, depth + 1)
+                _flatten(ydl, sub, out, limit, depth + 1, since_ts)
 
 
-def expand(urls, max_n):
+def expand(urls, max_n, since=None):
     ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 20}
     out, hint = [], None
+    since_ts = _parse_since(since) if since else 0
     with YoutubeDL(ydl_opts) as ydl:
         for u in urls:
             try:
@@ -314,7 +367,7 @@ def expand(urls, max_n):
                 continue
             if hint is None and len(urls) == 1 and info.get("title"):
                 hint = info.get("title")
-            _flatten(ydl, info, out, max_n)
+            _flatten(ydl, info, out, max_n, since_ts=since_ts)
             if len(out) >= max_n:
                 break
     # dedupe in case the same video came from two lists
@@ -629,8 +682,9 @@ def tui():
         if bad:
             print(red("Not a YouTube link: ") + ", ".join(bad))
             continue
+        since = input("Only videos since YYYY-MM-DD [any] > ").strip() or None
         print("Listing videos, wait...")
-        videos, hint = expand(urls, 5000)
+        videos, hint = expand(urls, 5000, since)
         if not videos:
             print("No videos found.")
             continue
@@ -684,7 +738,7 @@ def tui():
             continue
         try:
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
-                    layout=lay, template=tmp, pdf=pdf)
+                    layout=lay, template=tmp, pdf=pdf, since=since)
         except KeyboardInterrupt:
             print("\nCancelled.")
         again = input("\nNew job? [Enter]=yes, q=quit > ").strip()
@@ -692,14 +746,32 @@ def tui():
             return
 
 
-def _frontmatter(title, wurl, channel, vid, lg, auto):
+def _frontmatter(title, wurl, channel, vid, lg, auto, meta=None):
     def clean(s):
         s = " ".join(str(s).split()).replace('"', "'").replace("\\", "/")
         return s.lstrip("-?:,{}[]&*!|>#%@` ").strip() or "unknown"
     t = clean(title or vid)
     c = clean(channel or "unknown")
-    return (f"---\ntitle: \"{t}\"\nsource: {wurl}\nchannel: \"{c}\"\n"
-            f"video_id: {vid}\nlanguage: {lg}{' (auto)' if auto else ''}\n---\n\n")
+    out = (f"---\ntitle: \"{t}\"\nsource: {wurl}\nchannel: \"{c}\"\n"
+           f"video_id: {vid}\nlanguage: {lg}{' (auto)' if auto else ''}\n")
+    if meta:
+        if meta.get("published"):
+            out += f"published: {meta['published']}\n"
+        if meta.get("duration") is not None:
+            out += f"duration_secs: {meta['duration']}\n"
+        if meta.get("views") is not None:
+            out += f"views: {meta['views']}\n"
+        if meta.get("description"):
+            out += f"description: \"{clean(meta['description'][:500])}\"\n"
+    return out + "---\n\n"
+
+
+def _video_meta(info):
+    """Free metadata from the per-video extract (no extra requests)."""
+    ud = info.get("upload_date") or ""
+    pub = f"{ud[:4]}-{ud[4:6]}-{ud[6:8]}" if len(ud) == 8 else ""
+    return {"published": pub, "duration": info.get("duration"),
+            "views": info.get("view_count"), "description": info.get("description") or ""}
 
 
 def _existing_vid(path):
@@ -875,12 +947,35 @@ def md_to_pdf(md_path, pdf_path=None):
     return pdf_path
 
 
+def _cache_path(vid, lg):
+    base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+    return os.path.join(base, "tube2note", "subs", f"{vid}.{lg}.vtt")
+
+
+def _get_vtt(vid, lg, fmts, opener):
+    """Shared subtitle cache: same video is never downloaded twice (429-friendly)."""
+    p = _cache_path(vid, lg)
+    if os.path.exists(p):
+        try:
+            return open(p, encoding="utf-8").read(), True
+        except OSError:
+            pass
+    time.sleep(random.uniform(5, 10))  # pace timedtext fetches only
+    vtt = fetch_vtt(fmts, opener)
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w", encoding="utf-8").write(vtt)
+    except OSError:
+        pass
+    return vtt, False
+
+
 def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cooldown=600,
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
             verbose=False, layout="single", template="", pdf=False,
-            proxy=None, cookiefile=None):
+            proxy=None, cookiefile=None, since=None):
     if videos is None:
-        videos, _ = expand(urls, max_n)
+        videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
         outdir = os.path.expanduser(outdir)
         os.makedirs(outdir, exist_ok=True)
@@ -905,6 +1000,11 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             pass
     langs = [s.strip() for s in lang_str.split(",") if s.strip()]
     total = len(videos)
+    _save_last(urls=urls, out=os.path.basename(out),
+               outdir=os.path.dirname(os.path.abspath(out)) or ".", lang=lang_str,
+               max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown, layout=layout,
+               template=template, ts=ts, split_words=split_words, sleep=sleep,
+               since=since, proxy=proxy, cookiefile=cookiefile)
     print(f"{total} videos found", flush=True)
     if not videos:
         return
@@ -997,8 +1097,12 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             text, last = None, None
             for _ in (1, 2):  # ponytail: 60s + ONE retry on 429; hot retries extend the ban
                 try:
-                    time.sleep(random.uniform(5, 10))
-                    text = vtt_to_text(fetch_vtt(fmts, ydl.urlopen), ts).strip()
+                    vtt, cached = _get_vtt(v["id"], lg, fmts, ydl.urlopen)
+                    chaps = [(c.get("start_time") or 0, c.get("title") or "")
+                             for c in (info.get("chapters") or []) if c.get("title")]
+                    text = _join_paras(vtt_segments(vtt), ts, chaps or None).strip()
+                    if cached and verbose:
+                        log("  (from cache)")
                     break
                 except Exception as e:
                     last = e
@@ -1058,7 +1162,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     os.makedirs(os.path.dirname(vp), exist_ok=True)
                     with open(vp, "w", encoding="utf-8") as vf:
                         vf.write(_frontmatter(title, wurl, v.get("channel") or info.get("channel"),
-                                              v["id"], lg, auto))
+                                              v["id"], lg, auto, _video_meta(info)))
                         vf.write(f"## {title}\n\n{text}\n")
             except OSError as e:
                 print(red(f"  ! FATAL disk/IO error, stopping: {e}"))
@@ -1147,6 +1251,93 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         print(f"Checkpoint: {ok} videos, {words} words -> {out} (total: {ndone}/{len(videos)})")
 
 
+def cmd_doctor():
+    """Environment diagnosis: versions, fonts, config, disk."""
+    rows = []
+    try:
+        import yt_dlp.version as yv
+        rows.append(["yt-dlp installed", yv.__version__])
+    except Exception as e:
+        rows.append(["yt-dlp installed", f"missing ({e})"])
+    latest, note = _pypi_latest("yt-dlp")
+    rows.append(["yt-dlp latest (PyPI)", latest + note])
+    try:
+        import fpdf
+        rows.append(["fpdf2 (PDF)", fpdf.__version__])
+    except Exception:
+        rows.append(["fpdf2 (PDF)", "missing — pip install tube2note[pdf]"])
+    font_ok = any(os.path.exists(p) for p in
+                  ("/system/fonts/DroidSans.ttf",
+                   "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                   "/data/data/com.termux/files/usr/share/fonts/DejaVuSans.ttf"))
+    rows.append(["Unicode font (PDF Turkish)", "found" if font_ok else "MISSING — PDF folds to ASCII"])
+    try:
+        load_config()
+        rows.append(["config file", "parse ok"])
+    except Exception as e:
+        rows.append(["config file", f"BROKEN: {e}"])
+    try:
+        free = shutil.disk_usage(os.path.expanduser("~"))[2] // (1024 ** 3)
+        rows.append(["disk free (home)", f"{free} GB"])
+    except Exception as e:
+        rows.append(["disk free (home)", f"unknown ({e})"])
+    print(panel("tube2note doctor", []))
+    print(table(["Check", "Result"], rows))
+
+
+def _pypi_latest(pkg):
+    """(version, note): weekly-cached PyPI lookup, never fatal."""
+    cache = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+                         "tube2note", "pypi.json")
+    try:
+        d = json.load(open(cache, encoding="utf-8"))
+        if time.time() - d.get("ts", 0) < 7 * 86400 and d.get(pkg):
+            return d[pkg], " (cached)"
+    except (OSError, ValueError):
+        pass
+    try:
+        req = urllib.request.Request(f"https://pypi.org/pypi/{pkg}/json",
+                                     headers={"User-Agent": "tube2note-doctor"})
+        d2 = json.load(urllib.request.urlopen(req, timeout=15))
+        ver = d2["info"]["version"]
+        try:
+            old = {}
+            try:
+                old = json.load(open(cache, encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+            old.update({"ts": time.time(), pkg: ver})
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            json.dump(old, open(cache, "w", encoding="utf-8"))
+        except OSError:
+            pass
+        return ver, ""
+    except Exception as e:
+        return "unknown", f" ({e})"
+
+
+def cmd_widget():
+    """Write a Termux:Widget shortcut that resumes the last collection in one tap."""
+    dst = os.path.expanduser("~/.shortcuts/tube2note")
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with open(dst, "w", encoding="utf-8") as f:
+        f.write("#!/data/data/com.termux/files/usr/bin/bash\n"
+                "# Termux:Widget shortcut — resume last tube2note collection\n"
+                'if command -v tube2note >/dev/null; then exec tube2note --resume-last; '
+                'else exec python3 "$HOME/yt2md/tube2note.py" --resume-last; fi\n')
+    os.chmod(dst, 0o755)
+    print(f"Widget written to {dst} (needs Termux:Widget app).")
+
+
+def _save_last(**kw):
+    try:
+        store = load_config()
+        store["last"] = kw
+        save_config(store)
+    except OSError:
+        pass
+
+
 def cmd_status(d="."):
     d = os.path.expanduser(d)
     try:
@@ -1192,6 +1383,12 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "setup":
         cmd_setup("--advanced" in sys.argv)
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "doctor":
+        cmd_doctor()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "widget":
+        cmd_widget()
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "pdf":
         if len(sys.argv) < 3:
             print("Usage: tube2note.py pdf <file.md> [...]")
@@ -1214,6 +1411,8 @@ def main():
     ap.add_argument("-d", "--dir", default=None, help="output folder (created if missing)")
     ap.add_argument("--layout", default=None, help="output layout: single, videos or tree")
     ap.add_argument("--timestamps", action="store_true", default=None, help="keep [MM:SS] markers in transcripts")
+    ap.add_argument("--since", default=None, help="only videos published on/after YYYY-MM-DD")
+    ap.add_argument("--resume-last", action="store_true", help="re-run the last saved collection job")
     ap.add_argument("--name-template", default=None, help='per-video path template, e.g. "{channel}/{title} [{id}]"')
     ap.add_argument("--profile", default=None, help="config profile name (or YT2MD_PROFILE)")
     ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
@@ -1243,6 +1442,19 @@ def main():
                           "template": a.name_template}, profile)
     if a.dry_run:
         cmd_dryrun(a.urls, a.max, cfg["lang"])
+        return
+    if a.resume_last:
+        last = load_config().get("last")
+        if not last or not last.get("urls"):
+            ap.error("no saved job: run once first (resume info is stored automatically)")
+        run_job(last["urls"], last.get("out", "tube2note.md"), last.get("lang", cfg["lang"]),
+                last.get("max_n", 100), last.get("sleep", 2.0), False, last.get("chunk", 50),
+                last.get("chunk_cooldown", 600), a.throttle_cooldown,
+                outdir=last.get("outdir", "."), ts=last.get("ts", False),
+                split_words=last.get("split_words", 0), verbose=a.verbose,
+                layout=last.get("layout", "single"), template=last.get("template", ""),
+                pdf=a.pdf, proxy=last.get("proxy"), cookiefile=last.get("cookiefile"),
+                since=last.get("since"))
         return
     run_job(a.urls, a.out, cfg["lang"], a.max, a.sleep, a.fresh, cfg["chunk"],
             cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
