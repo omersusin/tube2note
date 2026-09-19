@@ -549,10 +549,18 @@ YT_RE = re.compile(r"(youtube\.com/(watch|shorts|playlist|@|channel/|c/|user/|li
 
 def show_intro():
     print(panel("tube2note — YouTube to NotebookLM", [
-        "Turn a channel, playlist or videos into ONE Markdown file.",
+        "Turn a channel, playlist or videos into Markdown + PDF.",
         "",
-        "  1. Paste link(s)      2. Check the auto-detected summary",
-        "  3. Press Enter        4. Upload the .md to NotebookLM",
+        "  HOW TO USE:",
+        "  1. Paste link(s) and press Enter",
+        "  2. Check the auto-detected summary table",
+        "  3. Answer 2-3 questions (all have defaults)",
+        "  4. Wait — the dashboard shows everything",
+        "  5. Upload the .md (or _part files) to NotebookLM",
+        "",
+        "  TIPS: Ctrl+C stops safely, resume anytime.",
+        "  Big file? Type 400000 at the split prompt.",
+        "  More: 'yt setup' (defaults), 'yt status' (progress).",
         "",
         dim("NotebookLM cap: 500,000 words per source file."),
     ]))
