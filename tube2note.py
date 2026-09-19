@@ -1156,6 +1156,33 @@ def _summary_prompt(text, lang):
             f"Reply in {lang}. Transcript:\n\n{text[:30000]}")
 
 
+def _translate_chunks(text, target, model, budget=4000):
+    """Translate long text in ID-marked chunks so timing/structure survives."""
+    paras = [p for p in text.split("\n\n") if p.strip()]
+    chunks, cur, n = [], [], 0
+    for p in paras:
+        if cur and n + len(p) > budget:
+            chunks.append(cur)
+            cur, n = [], 0
+        cur.append(p)
+        n += len(p)
+    if cur:
+        chunks.append(cur)
+    out = []
+    for c in chunks:
+        marked = "\n".join(f"[{i}] {p}" for i, p in enumerate(c))
+        prompt = (f"Translate the following to {target}. Keep each [N] marker at the start "
+                  f"of its paragraph, translate only the text. Reply with the marked paragraphs only:\n\n{marked}")
+        resp = _gemini_call(prompt, model)
+        lines = {}
+        for ln in resp.splitlines():
+            m = re.match(r"\[(\d+)\]\s*(.*)", ln.strip())
+            if m:
+                lines[int(m.group(1))] = m.group(2)
+        out.append("\n\n".join(lines.get(i, c[i]) for i in range(len(c))))
+    return "\n\n".join(out)
+
+
 def _gemini_summarize(text, lang="en", model=_GEMINI_MODEL):
     return _gemini_call(_summary_prompt(text, lang), model)
 
@@ -1183,8 +1210,100 @@ def _try_transcribe(vid, lang, tmpdir, model=_GEMINI_MODEL):
             pass
 
 
+WHISPER_MODEL_URLS = {
+    "tiny": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+    "base": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+}
+
+
+def find_whisper():
+    """(binary_path or None, hint). Checks env, PATH, ~/whisper.cpp build."""
+    cands = [os.environ.get("WHISPER_CLI", ""),
+             shutil.which("whisper-cli") or "",
+             os.path.expanduser("~/whisper.cpp/build/bin/whisper-cli")]
+    for p in cands:
+        if p and os.path.isfile(p) and os.access(p, os.X_OK):
+            return p, ""
+    legacy = os.path.expanduser("~/whisper.cpp/build/bin/main")
+    if os.path.isfile(legacy) and os.access(legacy, os.X_OK):
+        return legacy, ""
+    return None, "build whisper.cpp (cmake, GGML_NO_OPENMP=ON on Termux) or set WHISPER_CLI"
+
+
+def whisper_model_path(name="tiny"):
+    d = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+                     "tube2note", "models")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"ggml-{name}.bin")
+
+
+def ensure_whisper_model(name="tiny", auto_yes=False):
+    p = whisper_model_path(name)
+    if os.path.exists(p):
+        return p
+    print(f"Whisper model '{name}' (~{'75' if name == 'tiny' else '142'}MB) is missing.")
+    if not auto_yes:
+        try:
+            ans = input("Download it now? [y/N] > ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            return None
+        if ans not in ("y", "yes"):
+            return None
+    import subprocess
+    print(f"Downloading {name} model...")
+    r = subprocess.run(["curl", "-L", "-o", p, WHISPER_MODEL_URLS[name]],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.exists(p):
+        print(f"Model download failed. Get it manually: {WHISPER_MODEL_URLS[name]}")
+        return None
+    return p
+
+
+def _local_transcribe(vid, lang, tmpdir, model="tiny", auto_yes=False):
+    """Captionless fallback via external whisper.cpp. Returns (text, note) or (None, reason)."""
+    import subprocess
+    import tempfile
+    binary, hint = find_whisper()
+    if not binary:
+        return None, f"whisper.cpp not found ({hint})"
+    if not shutil.which("ffmpeg"):
+        return None, "needs ffmpeg (pkg install ffmpeg) for 16kHz WAV"
+    model_path = ensure_whisper_model(model, auto_yes)
+    if not model_path:
+        return None, "whisper model missing"
+    path, ext = _download_audio(vid, tmpdir)
+    if path is None:
+        return None, ext
+    try:
+        wav = os.path.join(tmpdir, vid + "_16k.wav")
+        r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path,
+                            "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav],
+                           capture_output=True, text=True, timeout=300)
+        if r.returncode != 0 or not os.path.exists(wav):
+            return None, "ffmpeg convert failed"
+        stem = os.path.join(tmpdir, vid + "_stt")
+        r = subprocess.run([binary, "-m", model_path, "-f", wav, "-l", lang,
+                            "-t", "2", "-ng", "-otxt", "-of", stem, "-np"],
+                           capture_output=True, text=True, timeout=1800)
+        out = stem + ".txt"
+        if r.returncode != 0 or not os.path.exists(out):
+            return None, "whisper.cpp failed"
+        text = open(out, encoding="utf-8").read().strip()
+        if len(text) < 50:
+            return None, "transcript too short"
+        return text, f"transcribed locally (whisper.cpp {model})"
+    finally:
+        for f in (path, os.path.join(tmpdir, vid + "_16k.wav"),
+                  os.path.join(tmpdir, vid + "_stt.txt")):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+
 def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
-                transcribe=False, tmpdir=None, summarize=False, gemini_model=_GEMINI_MODEL):
+                transcribe=False, tmpdir=None, summarize=False, gemini_model=_GEMINI_MODEL,
+                engine="api", translate=None):
     """One video, network only, never raises (except disk-full).
     Returns dict with stage: extract|subs|fetch|ok."""
     res = {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
@@ -1200,12 +1319,30 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
             lg, fmts, auto = pick_sub(info, langs)
             if not fmts:
                 if transcribe:
-                    ttext, note = _try_transcribe(v["id"], langs[0] if langs else "en", tmpdir,
-                                                  gemini_model)
+                    if engine == "local":
+                        ttext, note = _local_transcribe(v["id"], langs[0] if langs else "en",
+                                                        tmpdir)
+                    else:
+                        ttext, note = _try_transcribe(v["id"], langs[0] if langs else "en", tmpdir,
+                                                      gemini_model)
                     if ttext is not None:
+                        ttext = ttext.strip()
+                        if clean:
+                            ttext = _clean_text(ttext)
                         res.update(lg=langs[0] if langs else "en", auto=False, text=ttext,
                                    trans=True, stage="ok")
                         res["meta"]["method"] = "gemini-transcribe"
+                        if summarize and len(ttext.split()) > 100:
+                            try:
+                                res["summary"] = _gemini_summarize(ttext, res["lg"], gemini_model)
+                            except Exception as e:
+                                res["summary_error"] = str(e) or type(e).__name__
+                        if translate and len(ttext.split()) > 20:
+                            try:
+                                res["translation"] = _translate_chunks(ttext, translate,
+                                                                       gemini_model)
+                            except Exception as e:
+                                res["translation_error"] = str(e) or type(e).__name__
                         return res
                     res["error"] = f"no subtitles ({note})"
                 else:
@@ -1231,6 +1368,12 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                             res["summary"] = _gemini_summarize(res["text"], lg, gemini_model)
                         except Exception as e:
                             res["summary_error"] = str(e) or type(e).__name__
+                    if translate and len(res["text"].split()) > 20:
+                        try:
+                            res["translation"] = _translate_chunks(res["text"], translate,
+                                                                  gemini_model)
+                        except Exception as e:
+                            res["translation_error"] = str(e) or type(e).__name__
                     res["cached"] = cached
                     res["stage"] = "ok"
                     return res
@@ -1254,16 +1397,19 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
 
 
 def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
-            transcribe=False, tmpdir=None, summarize=False, gemini_model=_GEMINI_MODEL):
+            transcribe=False, tmpdir=None, summarize=False, gemini_model=_GEMINI_MODEL,
+            engine="api", translate=None):
     """Yield (i, v, res) in submission order; purely serial when workers<=1."""
     if workers <= 1:
         for i, v in work:
             yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap, clean,
-                                    transcribe, tmpdir, summarize, gemini_model)
+                                    transcribe, tmpdir, summarize, gemini_model, engine,
+                                    translate)
         return
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap,
-                                 clean, transcribe, tmpdir, summarize, gemini_model)) for i, v in work]
+                                 clean, transcribe, tmpdir, summarize, gemini_model,
+                                 engine, translate)) for i, v in work]
         for i, v, fu in futs:
             try:
                 yield i, v, fu.result()
@@ -1282,7 +1428,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             verbose=False, layout="single", template="", pdf=False,
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
             workers=1, clean=True, transcribe=False, summarize=False,
-            gemini_model=_GEMINI_MODEL):
+            gemini_model=_GEMINI_MODEL, engine="api", translate=None, auto_yes=False):
     if videos is None:
         videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
@@ -1309,8 +1455,11 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             pass
     langs = [s.strip() for s in lang_str.split(",") if s.strip()]
     total = len(videos)
-    if transcribe and not os.environ.get("GEMINI_API_KEY", ""):
+    if transcribe and not os.environ.get("GEMINI_API_KEY", "") and engine != "local":
         print("transcribe needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
+        return
+    if transcribe and engine == "local" and not ensure_extra("whisper", auto_yes):
+        print("local transcription unavailable — stopping before any work.")
         return
     if summarize and not os.environ.get("GEMINI_API_KEY", ""):
         print("summarize needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
@@ -1319,7 +1468,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                outdir=os.path.dirname(os.path.abspath(out)) or ".", lang=lang_str,
                max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown, layout=layout,
                template=template, ts=ts, split_words=split_words, sleep=sleep,
-               since=since, proxy=proxy, cookiefile=cookiefile, profile=profile)
+               since=since, proxy=proxy, cookiefile=cookiefile, profile=profile,
+               translate=translate)
     print(f"{total} videos found", flush=True)
     if not videos:
         return
@@ -1373,7 +1523,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         print(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
     with YoutubeDL(ydl_opts) as ydl:
         for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap,
-                                clean, transcribe, tmpdir, summarize, gemini_model):
+                                clean, transcribe, tmpdir, summarize, gemini_model,
+                                engine, translate):
             if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
                 if verbose:
                     log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
@@ -1433,11 +1584,16 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             sumblock = f"\n### Summary\n{res['summary']}\n" if res.get("summary") else ""
             if res.get("summary_error") and verbose:
                 log(f"  ! summary failed: {res['summary_error']}")
+            transblock = ""
+            if res.get("translation"):
+                transblock = f"\n### Translation ({translate})\n{res['translation']}\n"
+            elif res.get("translation_error") and verbose:
+                log(f"  ! translation failed: {res['translation_error']}")
             try:
                 fout.write(f"## {i}. {title}\n\n- Source: {wurl}\n"
                            f"- Video ID: {v['id']}\n- Subtitle lang: {lg}"
                            f"{' (transcribed)' if res.get('trans') else (' (auto)' if auto else '')}\n"
-                           f"{sumblock}\n{text}\n\n---\n\n")
+                           f"{sumblock}{transblock}\n{text}\n\n---\n\n")
                 fout.flush()
                 dlog.write(v["id"] + "\n")
                 dlog.flush()
@@ -1468,6 +1624,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                         vf.write(f"## {title}\n")
                         if res.get("summary"):
                             vf.write(f"\n### Summary\n{res['summary']}\n")
+                        if res.get("translation"):
+                            vf.write(f"\n### Translation ({translate})\n{res['translation']}\n")
                         vf.write(f"\n{text}\n")
             except OSError as e:
                 print(red(f"  ! FATAL disk/IO error, stopping: {e}"))
@@ -1649,6 +1807,82 @@ def _save_last(profile=None, **kw):
         pass
 
 
+def _has_fpdf():
+    try:
+        import fpdf  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+EXTRAS = {
+    "pdf": {"desc": "PDF export (fpdf2, ~5MB)",
+            "size": "~5MB",
+            "check": _has_fpdf,
+            "pip": ["fpdf2"]},
+    "whisper": {"desc": "Offline transcription via whisper.cpp binary + tiny model (~75MB)",
+                "size": "~75MB model",
+                "check": lambda: find_whisper()[0] is not None,
+                "pip": []},
+}
+
+
+def ensure_extra(name, auto_yes=False):
+    """Make sure an extra is available: check, else ask consent and install. Returns True if ready."""
+    info = EXTRAS.get(name)
+    if info is None:
+        print(f"unknown extra: {name}")
+        return False
+    try:
+        if info["check"]():
+            return True
+    except Exception:
+        pass
+    print(f"This needs the '{name}' extra: {info['desc']} [{info['size']}].")
+    if not auto_yes:
+        try:
+            ans = input("Download and enable it now? [y/N] > ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            return False
+        if ans not in ("y", "yes"):
+            print("Skipped. Re-run with --yes to skip this prompt.")
+            return False
+    for pkg in info.get("pip", []):
+        print(f"Installing {pkg}...")
+        import subprocess
+        r = subprocess.run([sys.executable, "-m", "pip", "install", pkg],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"Install failed:\n{r.stderr[-500:]}")
+            return False
+    try:
+        ok = bool(info["check"]())
+    except Exception:
+        ok = False
+    if ok:
+        try:
+            store = load_config()
+            store.setdefault("extras", {})[name] = True
+            save_config(store)
+        except OSError:
+            pass
+        return True
+    print(f"'{name}' still not available after install. See README troubleshooting.")
+    return False
+
+
+def cmd_extras():
+    rows = []
+    for name, info in EXTRAS.items():
+        try:
+            ok = bool(info["check"]())
+        except Exception:
+            ok = False
+        rows.append([name, info["desc"], "installed" if ok else "missing"])
+    print(table(["Extra", "What", "Status"], rows))
+    print(dim("Enable with: run the feature once and answer Y, or --yes for scripts."))
+
+
 def cmd_status(d="."):
     d = os.path.expanduser(d)
     try:
@@ -1704,6 +1938,9 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "widget":
         cmd_widget()
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "extras":
+        cmd_extras()
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "pdf":
         if len(sys.argv) < 3:
             print("Usage: tube2note.py pdf <file.md> [...]")
@@ -1737,7 +1974,10 @@ def main():
     ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
     ap.add_argument("--pdf", action="store_true", help="also write PDF next to the Markdown (needs fpdf2)")
     ap.add_argument("--transcribe", action="store_true", help="transcribe captionless videos via Gemini API (needs GEMINI_API_KEY)")
+    ap.add_argument("--engine", default="api", help="transcribe engine: api or local (whisper.cpp extra)")
+    ap.add_argument("--yes", action="store_true", help="auto-answer yes to extra download prompts")
     ap.add_argument("--summarize", action="store_true", help="add Gemini summary per video (needs GEMINI_API_KEY)")
+    ap.add_argument("--translate", default=None, help="translate transcript to LANG via Gemini (needs GEMINI_API_KEY), e.g. tr")
     ap.add_argument("--gemini-model", default=None, help="Gemini model for transcribe/summarize (default: gemini-2.5-flash-lite)")
     ap.add_argument("--proxy", default=None, help="proxy URL for all requests (yt-dlp syntax, e.g. socks5://127.0.0.1:1080)")
     ap.add_argument("--cookies", default=None, help="Netscape cookies.txt file (helps logged-in/age-gated content)")
@@ -1779,7 +2019,7 @@ def main():
                 split_words=last.get("split_words", 0), verbose=a.verbose,
                 layout=last.get("layout", "single"), template=last.get("template", ""),
                 pdf=a.pdf, proxy=last.get("proxy"), cookiefile=last.get("cookiefile"),
-                since=last.get("since"))
+                since=last.get("since"), translate=last.get("translate"))
         return
     run_job(a.urls, a.out, cfg["lang"], a.max, a.sleep, a.fresh, cfg["chunk"],
             cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
@@ -1788,7 +2028,8 @@ def main():
             proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile,
             fetch_gap=fetch_gap, workers=workers, clean=cfg["clean"],
             transcribe=a.transcribe, summarize=a.summarize,
-            gemini_model=a.gemini_model or _GEMINI_MODEL)
+            gemini_model=a.gemini_model or _GEMINI_MODEL, engine=a.engine,
+            translate=a.translate, auto_yes=a.yes)
 
 
 if __name__ == "__main__":
