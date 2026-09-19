@@ -27,6 +27,7 @@ PDF too? `pip install "tube2note[pdf]"`, then add `--pdf` (or run `tube2note pdf
 - **Personalization**: `setup` wizard, named `--profile`s, `YT2MD_*` env vars, per-folder `.yt2md.json` overrides
 - **NotebookLM-aware**: `--timestamps`, `--split-words` auto-split under the 500k-word cap, chapter-based sections, rich per-video metadata
 - **Transcript cleaning** (default on, `--no-clean` to disable): filler words, repeated phrases, one sentence per line
+- **Gemini extras** (needs free `GEMINI_API_KEY`): `--transcribe` for captionless videos, `--summarize` for per-video summaries
 - **PDF export**: `--pdf` or `pdf file.md [...]` (needs `pip install "tube2note[pdf]"`)
 - **Status & dry-run**: `status [dir]` progress table, `--dry-run` estimate before downloading
 - **Smart & polite**: shared subtitle cache (`~/.cache/tube2note`), `--since` date filter, `--proxy`/`--cookies`, `doctor` diagnosis, Termux:Widget one-tap resume

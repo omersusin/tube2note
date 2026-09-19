@@ -266,6 +266,12 @@ def _self_test():
         raise AssertionError("should need key")
     except SystemExit as e:
         assert "GEMINI_API_KEY" in str(e)
+    assert "transcript" in _summary_prompt("hello world", "en").lower()
+    try:
+        _gemini_summarize("hello world")
+        raise AssertionError("should need key")
+    except SystemExit as e:
+        assert "GEMINI_API_KEY" in str(e)
     assert _clean_text("good. Bad! Really? Yes.") == "good.\nBad!\nReally?\nYes."
     b = Bucket(rate=10, capacity=2)
     t = time.time()
@@ -1096,6 +1102,27 @@ def _download_audio(vid, tmpdir):
     return None, "audio file not found"
 
 
+def _gemini_call(prompt_text, model="gemini-2.0-flash"):
+    """Raw Gemini generateContent call over stdlib. Needs GEMINI_API_KEY."""
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        raise SystemExit("this needs GEMINI_API_KEY (free at aistudio.google.com)")
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt_text}]}],
+        "generationConfig": {"temperature": 0.0}}).encode()
+    req = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}",
+        data=body, headers={"Content-Type": "application/json"})
+    try:
+        resp = json.load(urllib.request.urlopen(req, timeout=120))
+    except Exception as e:
+        raise RuntimeError(f"Gemini API error: {e}")
+    try:
+        return resp["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(f"Gemini API unexpected response: {str(resp)[:200]}")
+
+
 def _gemini_transcribe(audio_bytes, mime, lang="en", model="gemini-2.0-flash"):
     """Send audio to Gemini API, return verbatim transcript. Needs GEMINI_API_KEY."""
     import base64
@@ -1118,6 +1145,16 @@ def _gemini_transcribe(audio_bytes, mime, lang="en", model="gemini-2.0-flash"):
         return resp["candidates"][0]["content"]["parts"][0]["text"].strip()
     except (KeyError, IndexError, TypeError):
         raise RuntimeError(f"Gemini API unexpected response: {str(resp)[:200]}")
+
+
+def _summary_prompt(text, lang):
+    return (f"Summarize the following video transcript (language: {lang}). "
+            f"First a 3-sentence overview, then up to 10 bullet key points. "
+            f"Reply in {lang}. Transcript:\n\n{text[:30000]}")
+
+
+def _gemini_summarize(text, lang="en"):
+    return _gemini_call(_summary_prompt(text, lang))
 
 
 def _try_transcribe(vid, lang, tmpdir):
@@ -1144,7 +1181,7 @@ def _try_transcribe(vid, lang, tmpdir):
 
 
 def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
-                transcribe=False, tmpdir=None):
+                transcribe=False, tmpdir=None, summarize=False):
     """One video, network only, never raises (except disk-full).
     Returns dict with stage: extract|subs|fetch|ok."""
     res = {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
@@ -1185,6 +1222,11 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                     res["text"] = _join_paras(vtt_segments(vtt), ts, res["chapters"] or None).strip()
                     if clean:
                         res["text"] = _clean_text(res["text"])
+                    if summarize and len(res["text"].split()) > 100:
+                        try:
+                            res["summary"] = _gemini_summarize(res["text"], lg)
+                        except Exception as e:
+                            res["summary_error"] = str(e) or type(e).__name__
                     res["cached"] = cached
                     res["stage"] = "ok"
                     return res
@@ -1208,16 +1250,16 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
 
 
 def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
-            transcribe=False, tmpdir=None):
+            transcribe=False, tmpdir=None, summarize=False):
     """Yield (i, v, res) in submission order; purely serial when workers<=1."""
     if workers <= 1:
         for i, v in work:
             yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap, clean,
-                                    transcribe, tmpdir)
+                                    transcribe, tmpdir, summarize)
         return
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap,
-                                 clean, transcribe, tmpdir)) for i, v in work]
+                                 clean, transcribe, tmpdir, summarize)) for i, v in work]
         for i, v, fu in futs:
             try:
                 yield i, v, fu.result()
@@ -1235,7 +1277,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
             verbose=False, layout="single", template="", pdf=False,
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
-            workers=1, clean=True, transcribe=False):
+            workers=1, clean=True, transcribe=False, summarize=False):
     if videos is None:
         videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
@@ -1264,6 +1306,9 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     total = len(videos)
     if transcribe and not os.environ.get("GEMINI_API_KEY", ""):
         print("transcribe needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
+        return
+    if summarize and not os.environ.get("GEMINI_API_KEY", ""):
+        print("summarize needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
         return
     _save_last(urls=urls, out=os.path.basename(out),
                outdir=os.path.dirname(os.path.abspath(out)) or ".", lang=lang_str,
@@ -1323,7 +1368,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         print(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
     with YoutubeDL(ydl_opts) as ydl:
         for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap,
-                                clean, transcribe, tmpdir):
+                                clean, transcribe, tmpdir, summarize):
             if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
                 if verbose:
                     log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
@@ -1380,10 +1425,14 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 skip.append((title, wurl, "subtitle too short"))
                 consec, status = 0, "subtitle too short"
                 continue
+            sumblock = f"\n### Summary\n{res['summary']}\n" if res.get("summary") else ""
+            if res.get("summary_error") and verbose:
+                log(f"  ! summary failed: {res['summary_error']}")
             try:
                 fout.write(f"## {i}. {title}\n\n- Source: {wurl}\n"
                            f"- Video ID: {v['id']}\n- Subtitle lang: {lg}"
-                           f"{' (transcribed)' if res.get('trans') else (' (auto)' if auto else '')}\n\n{text}\n\n---\n\n")
+                           f"{' (transcribed)' if res.get('trans') else (' (auto)' if auto else '')}\n"
+                           f"{sumblock}\n{text}\n\n---\n\n")
                 fout.flush()
                 dlog.write(v["id"] + "\n")
                 dlog.flush()
@@ -1411,7 +1460,10 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     with open(vp, "w", encoding="utf-8") as vf:
                         vf.write(_frontmatter(title, wurl, v.get("channel") or res.get("channel"),
                                               v["id"], lg, auto, res.get("meta")))
-                        vf.write(f"## {title}\n\n{text}\n")
+                        vf.write(f"## {title}\n")
+                        if res.get("summary"):
+                            vf.write(f"\n### Summary\n{res['summary']}\n")
+                        vf.write(f"\n{text}\n")
             except OSError as e:
                 print(red(f"  ! FATAL disk/IO error, stopping: {e}"))
                 raise SystemExit(1)
@@ -1680,6 +1732,7 @@ def main():
     ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
     ap.add_argument("--pdf", action="store_true", help="also write PDF next to the Markdown (needs fpdf2)")
     ap.add_argument("--transcribe", action="store_true", help="transcribe captionless videos via Gemini API (needs GEMINI_API_KEY)")
+    ap.add_argument("--summarize", action="store_true", help="add Gemini summary per video (needs GEMINI_API_KEY)")
     ap.add_argument("--proxy", default=None, help="proxy URL for all requests (yt-dlp syntax, e.g. socks5://127.0.0.1:1080)")
     ap.add_argument("--cookies", default=None, help="Netscape cookies.txt file (helps logged-in/age-gated content)")
     ap.add_argument("--tui", action="store_true", help="interactive mode (short command)")
@@ -1728,7 +1781,7 @@ def main():
             layout=cfg["layout"], template=cfg["template"], pdf=a.pdf,
             proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile,
             fetch_gap=fetch_gap, workers=workers, clean=cfg["clean"],
-            transcribe=a.transcribe)
+            transcribe=a.transcribe, summarize=a.summarize)
 
 
 if __name__ == "__main__":
