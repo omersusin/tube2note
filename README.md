@@ -160,7 +160,7 @@ tube2note serve --public --allow-host .serveousercontent.com   # public demo (se
 
 Paste URLs → **Start** → progress → **View / Download**. **Preview** runs `--dry-run`. Each job is a normal `tube2note` subprocess, so resume/layouts/throttling behave exactly like the CLI (re-use an output name to resume). Gemini options appear only if `GEMINI_API_KEY` is set on the server machine — the key is never sent to the page. Safety: binds `127.0.0.1`, random per-launch token, field validation, serves only `.md`/`.pdf` from the output folder. `--host 0.0.0.0` exposes it to your LAN — only on networks you trust.
 
-Public demo recipe (verified): `tube2note serve --public` (token auth stays on, Gemini stays hidden) + a tunnel like `ssh -R 80:localhost:8765 serveo.net`. `--allow-host` accepts suffixes for rotating tunnel domains.
+Public demo recipe (verified): `tube2note serve --public --allow-host .ngrok-free.dev` (no token needed, Gemini options stay hidden) + a tunnel like ngrok or `ssh -R 80:localhost:8765 serveo.net`. `--allow-host` accepts suffixes for rotating tunnel domains. Live right now: https://catalyze-displease-kissable.ngrok-free.dev/ (runs on the dev phone, online while it stays up).
 
 ## Site backend
 
