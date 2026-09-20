@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="tube2note web: run YouTube to Markdown from your browser via free backend.">
+<link rel="manifest" href="manifest.webmanifest">
+<title>tube2note web</title>
+<style>body{font-family:system-ui;max-width:720px;margin:2em auto;padding:0 1em;line-height:1.6}
+textarea,input,select{width:100%;padding:.6em;margin:.3em 0}pre{background:#f4f4f4;padding:1em;overflow:auto}</style>
+</head>
+<body>
+<h1>tube2note web</h1>
+<p>Static page (GitHub Pages) + free backend. No keys in this page — see BACKEND.md.
+Local alternative: <code>tube2note serve</code> on your machine.</p>
+<form id="f">
+<textarea id="urls" placeholder="https://www.youtube.com/@SomeChannel/videos"></textarea>
+<input id="name" value="tube2note.md">
+<input id="lang" placeholder="en or tr,en">
+<div><select id="layout"><option>single</option><option>videos</option><option>tree</option></select>
+<input id="max" type="number" value="100" min="1" max="5000">
+<input id="since" type="date"></div>
+<div><label><input id="timestamps" type="checkbox"> timestamps</label>
+<label><input id="clean" type="checkbox" checked> clean</label>
+<input id="split" type="number" value="0" min="0" title="split every N words">
+<input id="workers" type="number" value="1" min="1" max="4"></div>
+<button id="go" type="button">Start</button>
+</form>
+<p id="err"></p>
+<progress id="bar" value="0" max="100"></progress> <span id="nums"></span>
+<pre id="log"></pre>
+<a id="dl" hidden>Download</a>
+<script src="app.js"></script>
+</body>
+</html>

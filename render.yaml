@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: tube2note
+    runtime: docker
+    dockerfilePath: Dockerfile.backend
+    plan: free
+    healthCheckPath: /api/state
+    envVars:
+      - {key: PORT, value: 8000}
+      - {key: OUT_DIR, value: /tmp/tube2note-out}
+      - {key: BACKEND_TOKEN, sync: false}

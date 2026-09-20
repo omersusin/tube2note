@@ -5,8 +5,12 @@
 .ruff_cache/
 .venv/
 .bak/
+.bak_phase2/
+.bak_phase3/
 __pycache__/
 apply.py
+phase2_apply.py
+phase3_apply.py
 build/
 dist/
 tube2note-out/
