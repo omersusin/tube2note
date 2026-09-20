@@ -89,8 +89,8 @@ def _list_save(urls, max_n, since, videos, hint, complete):
         pass
 
 
-def expand(urls, max_n, since=None):
-    cached = _list_load(urls, max_n, since)
+def expand(urls, max_n, since=None, fresh=False):
+    cached = None if fresh else _list_load(urls, max_n, since)
     if cached is not None:
         print(f"list from cache ({len(cached[0])} videos)", flush=True)
         return cached

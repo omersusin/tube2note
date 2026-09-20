@@ -98,6 +98,14 @@ def cmd_widget():
     print(f"Widget written to {dst} (needs Termux:Widget app).")
 
 
+def _has_faster_whisper():
+    try:
+        import faster_whisper  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 EXTRAS = {
     "pdf": {"desc": "PDF export (fpdf2, ~5MB)",
             "size": "~5MB",
@@ -107,6 +115,10 @@ EXTRAS = {
                 "size": "~75MB model",
                 "check": lambda: find_whisper()[0] is not None,
                 "pip": []},
+    "faster-whisper": {"desc": "Local neural STT (needs compiled torch/onnx — NOT installable on Termux, PC only)",
+                "size": "~500MB",
+                "check": _has_faster_whisper,
+                "pip": ["faster-whisper"]},
 }
 
 
@@ -154,7 +166,29 @@ def ensure_extra(name, auto_yes=False):
     return False
 
 
-def cmd_extras():
+def cmd_extras(argv=None):
+    argv = argv or []
+    if len(argv) >= 2 and argv[0] == "install":
+        print("installed." if ensure_extra(argv[1], "--yes" in argv) else "not installed.")
+        return
+    if len(argv) >= 2 and argv[0] == "remove":
+        name = argv[1]
+        info = EXTRAS.get(name)
+        if info is None:
+            print(f"unknown extra: {name}")
+            return
+        import subprocess
+        for pkg in info.get("pip", []):
+            r = subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", pkg],
+                               capture_output=True, text=True)
+            print(r.stdout.strip().splitlines()[-1] if r.returncode == 0 else f"remove failed: {r.stderr[-200:]}")
+        try:
+            store = load_config()
+            store.get("extras", {}).pop(name, None)
+            save_config(store)
+        except OSError:
+            pass
+        return
     rows = []
     for name, info in EXTRAS.items():
         try:
@@ -163,7 +197,7 @@ def cmd_extras():
             ok = False
         rows.append([name, info["desc"], "installed" if ok else "missing"])
     print(table(["Extra", "What", "Status"], rows))
-    print(dim("Enable with: run the feature once and answer Y, or --yes for scripts."))
+    print(dim("Usage: extras [install|remove] <name> [--yes]"))
 
 
 def _pkg_version():

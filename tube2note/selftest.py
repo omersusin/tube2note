@@ -5,9 +5,11 @@ import tempfile
 import time
 
 from .clean import _clean_text
+from .commands import EXTRAS
 from .config import DEFAULTS, _merge
 from .job import _exit_code
 from .llm import _gemini_summarize, _gemini_transcribe, _split_words, _summary_prompt
+from .mcp import _handle as _mcp_handle
 from .naming import render_template, sanitize_filename, slug
 from .output import _existing_vid, _frontmatter, _purge_video, _skip_map, _unique_path
 from .pdf import _fold_latin1, _md_line_kind
@@ -24,6 +26,7 @@ from .throttle import Bucket, _is_throttle
 from .tui import YT_RE
 from .ui import _render_dash, bar, dash_end, dash_update, log, panel, table
 from .vtt import _join_paras, vtt_segments, vtt_to_text
+from .watch import _new_videos
 
 
 def _self_test():
@@ -152,4 +155,8 @@ def _self_test():
     os.environ["XDG_CACHE_HOME"] = rd2
     _list_save(["u9"], 100, None, [], "H", True)
     assert _list_load(["u9"], 100, None) is None  # empty listings are never cached
+    assert [v["id"] for v in _new_videos([{"id": "a"}, {"id": "b"}], {"a"})] == ["b"]
+    assert {t["name"] for t in _mcp_handle({"id": 1, "method": "tools/list", "params": {}})[0]["result"]["tools"]} == \
+        {"download", "status", "dry_run"}
+    assert set(EXTRAS) >= {"pdf", "whisper", "faster-whisper"}
     print("self-test ok")

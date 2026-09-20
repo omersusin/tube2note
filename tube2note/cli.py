@@ -47,7 +47,14 @@ def main():
         cmd_share()
         return
     if len(sys.argv) > 1 and sys.argv[1] == "extras":
-        cmd_extras()
+        cmd_extras(sys.argv[2:])
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "watch":
+        from .watch import cmd_watch
+        raise SystemExit(cmd_watch(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        from .mcp import cmd_mcp
+        cmd_mcp()
         return
     if len(sys.argv) > 1 and sys.argv[1] == "pdf":
         if len(sys.argv) < 3:
