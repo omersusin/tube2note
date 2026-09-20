@@ -101,7 +101,9 @@ def tui():
         if bad:
             print(red("Not a YouTube link: ") + ", ".join(bad))
             continue
-        since = input("Only videos since YYYY-MM-DD [any] > ").strip() or None
+        multi = len(urls) > 1 or any(x in u for u in urls
+                                     for x in ("/playlist", "/@", "/channel", "/c/"))
+        since = (input("Only videos since YYYY-MM-DD [any] > ").strip() or None) if multi else None
         print("Listing videos, wait...")
         videos, hint = expand(urls, 5000, since)
         if not videos:
@@ -119,7 +121,14 @@ def tui():
             ["Est. time", f"~{est:.0f} min paced" if est >= 1 else "<1 min"],
         ]))
         out = input(f"Output file [{guess}] > ").strip() or guess
-        outdir = input(f"Folder [{cfg['outdir']}] > ").strip() or cfg["outdir"]
+        lastdir = load_config().get("lastdir") or cfg["outdir"]
+        outdir = input(f"Folder [{lastdir}] > ").strip() or lastdir
+        try:
+            _st = load_config()
+            _st["lastdir"] = outdir
+            save_config(_st)
+        except OSError:
+            pass
         lay = input(f"Layout (single/videos/tree) [{cfg['layout']}] > ").strip().lower() or cfg["layout"]
         lay = lay if lay in ("single", "videos", "tree") else "single"
         lang = input(f"Languages [{sug}] > ").strip() or sug
