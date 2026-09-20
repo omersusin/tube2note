@@ -6,7 +6,6 @@ import time
 
 from .config import resolve_config
 from .job import _exit_code, run_job
-from .llm import _GEMINI_MODEL
 from .source import expand
 
 

@@ -1,5 +1,4 @@
 """Watch mode, MCP server, extras install/remove (all offline)."""
-import json
 import sys
 
 import pytest
