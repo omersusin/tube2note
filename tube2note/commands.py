@@ -170,6 +170,20 @@ def _pkg_version():
     return __version__
 
 
+def cmd_share():
+    """Install a Termux share-sheet hook: share a YouTube link from any app into tube2note."""
+    dst = os.path.expanduser("~/bin/termux-url-opener")
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with open(dst, "w", encoding="utf-8") as f:
+        f.write("#!/data/data/com.termux/files/usr/bin/bash\n"
+                "# tube2note share hook: `Share > Termux` on a YouTube link downloads its transcript.\n"
+                'cd "$HOME/yt2md" || exit 1\n'
+                'if command -v tube2note >/dev/null; then exec tube2note -o shared.md "$1"; '
+                'else exec python3 -m tube2note -o shared.md "$1"; fi\n')
+    os.chmod(dst, 0o755)
+    print(f"Share hook written to {dst} (Share a YouTube link > Termux).")
+
+
 def cmd_status(d=".", as_json=False):
     d = os.path.expanduser(d)
     try:

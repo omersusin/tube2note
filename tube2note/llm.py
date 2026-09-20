@@ -94,7 +94,7 @@ def _gemini_transcribe(audio_bytes, mime, lang="en", model=_GEMINI_MODEL):
 def _summary_prompt(text, lang):
     return (f"Summarize the following video transcript (language: {lang}). "
             f"First a 3-sentence overview, then up to 10 bullet key points. "
-            f"Reply in {lang}. Transcript:\n\n{text[:30000]}")
+            f"Reply in {lang}. Transcript:\n\n{text}")
 
 
 def _translate_chunks(text, target, model, budget=4000):
@@ -124,8 +124,31 @@ def _translate_chunks(text, target, model, budget=4000):
     return "\n\n".join(out)
 
 
+def _split_words(text, budget=20000):
+    """Split text into <=budget-char pieces at paragraph boundaries."""
+    chunks, cur, n = [], [], 0
+    for p in text.split("\n\n"):
+        if not p.strip():
+            continue
+        if cur and n + len(p) > budget:
+            chunks.append(cur)
+            cur, n = [], 0
+        cur.append(p)
+        n += len(p)
+    if cur:
+        chunks.append(cur)
+    return ["\n\n".join(c) for c in chunks] or [text]
+
+
 def _gemini_summarize(text, lang="en", model=_GEMINI_MODEL):
-    return _gemini_call(_summary_prompt(text, lang), model)
+    parts = _split_words(text)
+    if len(parts) == 1:
+        return _gemini_call(_summary_prompt(parts[0], lang), model)
+    secs = [_gemini_call(_summary_prompt(p, lang), model) for p in parts]
+    merge = ("Combine the following section summaries of one video into a single summary: "
+             f"a 3-sentence overview, then up to 10 bullet key points. Reply in {lang}.\n\n"
+             + "\n\n".join(f"[Part {i}] {s}" for i, s in enumerate(secs)))
+    return _gemini_call(merge, model)
 
 
 def _try_transcribe(vid, lang, tmpdir, model=_GEMINI_MODEL):

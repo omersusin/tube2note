@@ -6,7 +6,7 @@ import time
 
 from .clean import _clean_text
 from .config import DEFAULTS, _merge
-from .llm import _gemini_summarize, _gemini_transcribe, _summary_prompt
+from .llm import _gemini_summarize, _gemini_transcribe, _split_words, _summary_prompt
 from .naming import render_template, sanitize_filename, slug
 from .output import _existing_vid, _frontmatter, _purge_video, _skip_map, _unique_path
 from .pdf import _fold_latin1, _md_line_kind
@@ -62,6 +62,9 @@ def _self_test():
     except SystemExit as e:
         assert "GEMINI_API_KEY" in str(e)
     assert "transcript" in _summary_prompt("hello world", "en").lower()
+    long = "\n\n".join(f"para {i} " + "word " * 5000 for i in range(4))
+    assert len(_split_words(long, 20000)) >= 2
+    assert _split_words("short text", 20000) == ["short text"]
     try:
         _gemini_summarize("hello world")
         raise AssertionError("should need key")

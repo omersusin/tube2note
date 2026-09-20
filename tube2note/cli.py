@@ -8,6 +8,7 @@ from .commands import (
     cmd_doctor,
     cmd_dryrun,
     cmd_extras,
+    cmd_share,
     cmd_status,
     cmd_widget,
 )
@@ -41,6 +42,9 @@ def main():
         return
     if len(sys.argv) > 1 and sys.argv[1] == "widget":
         cmd_widget()
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "share":
+        cmd_share()
         return
     if len(sys.argv) > 1 and sys.argv[1] == "extras":
         cmd_extras()
