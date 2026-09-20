@@ -22,18 +22,18 @@ PDF too? `pip install "tube2note[pdf]"`, then add `--pdf` (or run `tube2note pdf
 
 - **Channel / playlist / video URLs** (auto-detected listing, Shorts/tabs handled)
 - **Guided TUI**: intro, first-run guide, auto-detected file name / video count / languages, confirm table, live dashboard (bar + current video + stats)
-- **Anti-throttle engine**: chunks with breaks, jittered pacing, single retry on 429, long cooldown after 5 throttles in a row
-- **Resume**: `.done` log — Ctrl+C anytime, continue later; skip log reconciled every run
+- **Anti-throttle engine**: chunks with breaks, jittered pacing, single retry on 429, long cooldown after 5 throttles in a row, optional `--workers 2-4` behind one shared bucket (default: serial, safest)
+- **Resume & redo**: `.done` log — Ctrl+C anytime, continue later; skip log reconciled every run; `--redo VIDEO_ID` reprocesses one video cleanly
 - **Layouts**: `single` (one .md), `videos` (per-video files + `INDEX.md`), `tree` (`Channel/Video/transcript.md` + `INDEX.md` + YAML frontmatter)
 - **Name templates**: `--name-template "{channel}/{title} [{id}]"` (fields: channel, title, id, index, date, lang)
 - **Personalization**: `setup` wizard, named `--profile`s, `YT2MD_*` env vars, per-folder `.yt2md.json` overrides
 - **NotebookLM-aware**: `--timestamps`, `--split-words` auto-split under the 500k-word cap, chapter-based sections, rich per-video metadata
 - **Transcript cleaning** (default on, `--no-clean` to disable): filler words, repeated phrases, one sentence per line
-- **Gemini extras** (needs free `GEMINI_API_KEY`): `--transcribe` for captionless videos, `--summarize` for per-video summaries, `--translate LANG`
+- **Gemini extras** (needs free `GEMINI_API_KEY`; transcripts sent to Google — printed every run): `--transcribe` for captionless videos (`--engine local` uses your whisper.cpp instead), `--summarize` per-video summaries, `--translate LANG`
 - **Web UI**: `tube2note serve` opens a phone-friendly page to start, watch and stop jobs and download the results (stdlib only, works in Termux)
 - **PDF export**: `--pdf` or `pdf file.md [...]` (needs `pip install "tube2note[pdf]"`)
-- **Status & dry-run**: `status [dir]` progress table, `--dry-run` estimate before downloading
-- **Smart & polite**: shared subtitle cache (`~/.cache/tube2note`), `--since` date filter, `--proxy`/`--cookies`, `doctor` diagnosis, Termux:Widget one-tap resume
+- **Status & dry-run**: `status [dir]` progress table (`--json` for scripts), `--dry-run` estimate before downloading
+- **Smart & polite**: shared subtitle cache (`~/.cache/tube2note`), `--since` date filter, `--proxy`/`--cookies`, `doctor` diagnosis, Termux:Widget one-tap resume, Termux share-sheet hook (`tube2note share`)
 
 ## Quickstart
 
