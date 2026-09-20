@@ -77,6 +77,10 @@ Paste URLs, tap **Start**, watch progress, tap **View / Download** when it finis
 
 Safety: it listens on `127.0.0.1` only, requires a random per-launch token (the link printed at start), validates every field, and only serves `.md`/`.pdf` files from the output folder. `--host 0.0.0.0` exposes it to your network: do that only on networks you trust.
 
+Public demo: `tube2note serve --public` (token auth stays on; Gemini options stay hidden) + `--allow-host .serveousercontent.com`, then a tunnel like `ssh -R 80:localhost:8765 serveo.net` gives you a public link to share.
+
+Exit codes: `0` = all videos ok, `1` = partial/none (cron-friendly), `2` = fatal (raised). The web UI treats 0+1 as done.
+
 ## Site backend
 
 The [site form](https://omersusin.github.io/tube2note/app.html) needs a backend (Pages is static-only). Free path: deploy `render.yaml` to Render (or `fly.toml` to Fly.io), set `BACKEND_URL` in `docs/app.js`, redeploy Pages. Full runbook in `docs/BACKEND.md`. Local alternative: `tube2note serve` + PWA shell in `docs/`.
