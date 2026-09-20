@@ -60,6 +60,9 @@ def main():
             _i = sys.argv.index("-d")
             _d = sys.argv[_i + 1] if _i + 1 < len(sys.argv) else "."
         raise SystemExit(search_collections(_q, _d, _j))
+    if len(sys.argv) > 1 and sys.argv[1] == "serve-api":
+        from .server_api import main as _api_main
+        raise SystemExit(_api_main())
     if len(sys.argv) > 1 and sys.argv[1] == "mcp":
         from .mcp import cmd_mcp
         cmd_mcp()
