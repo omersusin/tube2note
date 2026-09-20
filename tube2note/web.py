@@ -274,12 +274,17 @@ class App:
     def state(self):
         with self.lock:
             job = self.job.snapshot() if self.job else None
-        return {"version": __version__, "base_dir": self.base_dir, "gemini": gemini_available(),
+        return {"version": __version__, "base_dir": self.base_dir,
+                "gemini": gemini_available() and not self.public,
                 "pdf": _has_fpdf(), "defaults": self.defaults, "job": job,
                 "running": bool(job and job["state"] in ("running", "stopping")),
                 "files": list_files(self.base_dir)}
 
     def start(self, payload):
+        if self.public and isinstance(payload, dict):
+            # anonymous visitors must never spend the host's Gemini quota
+            payload = {k: v for k, v in payload.items()
+                       if k not in ("transcribe", "summarize", "translate")}
         argv = self.argv_builder(payload, self.base_dir)
         with self.lock:
             if self.job and self.job.running:

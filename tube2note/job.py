@@ -149,17 +149,17 @@ def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
             futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap,
                                      clean, transcribe, tmpdir, summarize, gemini_model,
                                      engine, translate)) for i, v in batch]
-        for i, v, fu in futs:
-            try:
-                yield i, v, fu.result()
-            except Exception as e:
-                if getattr(e, "errno", None) == 28:
-                    raise
-                yield i, v, {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
-                             "channel": v.get("channel"), "lg": None, "auto": False,
-                             "text": None, "error": str(e) or type(e).__name__,
-                             "throttled": _is_throttle(e), "stage": "extract",
-                             "chapters": [], "meta": {}}
+            for i, v, fu in futs:
+                try:
+                    yield i, v, fu.result()
+                except Exception as e:
+                    if getattr(e, "errno", None) == 28:
+                        raise
+                    yield i, v, {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
+                                 "channel": v.get("channel"), "lg": None, "auto": False,
+                                 "text": None, "error": str(e) or type(e).__name__,
+                                 "throttled": _is_throttle(e), "stage": "extract",
+                                 "chapters": [], "meta": {}}
 
 
 def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cooldown=600,

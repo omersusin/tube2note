@@ -7,3 +7,7 @@
 __pycache__/
 build/
 dist/
+tube2note-out/
+*.md.done
+*.md.skip
+*.md.words

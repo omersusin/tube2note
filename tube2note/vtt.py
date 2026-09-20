@@ -23,18 +23,23 @@ def _fmt_ts(s):
 
 def vtt_segments(vtt: str):
     """Parse VTT into [(start_secs, text)] with back-to-back dupes dropped."""
+    lines = vtt.splitlines()
+    # everything before the first cue timing line is header: the WEBVTT signature
+    # plus YouTube's "Kind: captions" / "Language: en" metadata, never transcript
+    in_header = bool(lines) and lines[0].lstrip("﻿").strip().startswith("WEBVTT")
     segs, start = [], 0.0
-    for block in vtt.splitlines():
+    for idx, block in enumerate(lines):
         s = block.strip()
-        if not s or s == "WEBVTT" or s.startswith("NOTE") or s.startswith("STYLE") or s.startswith("REGION"):
-            continue
         if "-->" in s:
+            in_header = False
             start = _to_secs(s.split("-->")[0])
             continue
-        if s.isdigit():
+        if in_header or not s or s.startswith(("NOTE", "STYLE", "REGION")):
             continue
+        if s.isdigit() and idx + 1 < len(lines) and "-->" in lines[idx + 1]:
+            continue  # numeric cue identifier; a spoken number alone ("1999") is real text
         s = TAG_RE.sub("", s)
-        s = html.unescape(s).replace(" ", " ").strip()
+        s = html.unescape(s).replace(" ", " ").strip()
         if s and (not segs or segs[-1][1] != s):  # drop back-to-back duplicates from auto captions
             segs.append((start, s))
     return segs
