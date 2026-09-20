@@ -1,6 +1,18 @@
-[![version v0.5.0](https://img.shields.io/badge/version-v0.5.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.5.0)
+[![version v0.9.0](https://img.shields.io/badge/version-v0.9.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.9.0)
 
-## v0.5.0 (current)
+## v0.8.0
+99b8242 0.8.0: link-timestamps/srt wired everywhere, backend token fail-closed, full README
+81a501d README deep pass: --fresh/--yes, MCP snippet, env list, serve flags, gemini-model
+36260e1 README: exit codes, public demo mode
+7bbbe57 README: 0.7.0 features, site link, badges
+
+## v0.7.0
+1df0574 0.7.0: backend API, site app, timestamps/SRT libs, subs, tauri scaffold
+10b73d0 Merge pull request #2 from omersusin/v060
+5026998 v0.6.0+v0.7.0: backend API, site app, timestamps/SRT libs, subs, tauri scaffold
+f3b0d29 Pages: allow manual deploy
+
+## v0.5.0
 da1487f 0.5.0: audit fixes + api/search/pages
 3cc200e Merge pull request #1 from omersusin/v050
 e10374d Ruff format: blank lines after imports

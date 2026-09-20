@@ -142,6 +142,7 @@ class Job:
 
     def __init__(self, argv, name, dry_run=False):
         self.argv, self.name, self.dry_run = argv, name, dry_run
+        self._timer = None
         self.lines = collections.deque(maxlen=400)
         self.lock = threading.Lock()
         self.progress = {"done": 0, "total": 0, "words": 0}
@@ -173,6 +174,8 @@ class Job:
                     self.proc.stdout.close()
             except Exception:
                 pass
+            if self._timer is not None:
+                self._timer.cancel()
             self.ended = time.time()
 
     @property
@@ -184,9 +187,13 @@ class Job:
             return
         self.stopped = True
         try:  # SIGINT lets the job flush its .done log like Ctrl+C would; fall back to terminate
+            if self._timer is not None:
+                self._timer.cancel()
             if os.name == "posix":
                 self.proc.send_signal(signal.SIGINT)
-                threading.Timer(8, self._terminate).start()
+                self._timer = threading.Timer(8, self._terminate)
+                self._timer.daemon = True
+                self._timer.start()
             else:
                 self.proc.terminate()
         except OSError:
@@ -565,6 +572,8 @@ pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:10px;m
 <div><label for="lang">Languages</label><input type="text" id="lang" placeholder="en or tr,en" autocapitalize="off"></div>
 </div>
 <label class="chk"><input type="checkbox" id="timestamps"> Keep [MM:SS] timestamps</label>
+<label class="chk"><input type="checkbox" id="link_timestamps"> Clickable timestamp links</label>
+<label class="chk"><input type="checkbox" id="srt"> Write .srt sidecars</label>
 <label class="chk"><input type="checkbox" id="clean" checked> Clean transcripts</label>
 <label class="chk" id="pdfrow"><input type="checkbox" id="pdf"> Also write PDF</label>
 <details><summary>More options</summary>
@@ -599,7 +608,7 @@ pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:10px;m
 <script nonce="__NONCE__">
 const $=id=>document.getElementById(id);
 const FIELDS=["urls","name","lang","layout","max","since","split_words","workers","translate"];
-const BOOLS=["timestamps","clean","pdf","summarize","transcribe"];
+const BOOLS=["timestamps","link_timestamps","srt","clean","pdf","summarize","transcribe"];
 let busy=false,timer=null,seeded=false;
 function save(){try{const o={};FIELDS.forEach(f=>o[f]=$(f).value);BOOLS.forEach(f=>o[f]=$(f).checked);localStorage.setItem("t2n",JSON.stringify(o))}catch(e){}}
 function load(){try{const o=JSON.parse(localStorage.getItem("t2n")||"null");if(!o)return false;FIELDS.forEach(f=>{if(o[f]!=null)$(f).value=o[f]});BOOLS.forEach(f=>{if(o[f]!=null)$(f).checked=o[f]});return true}catch(e){return false}}

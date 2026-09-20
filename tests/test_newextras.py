@@ -49,7 +49,8 @@ def test_watch_fatal_keeps_seen(home, monkeypatch):
     monkeypatch.setattr(w, "run_job", lambda *a, **k: {"ok": 0, "skipped": 0, "total": 0})  # fatal: throttled out
     import argparse
     args = argparse.Namespace(max=30, sleep=0, throttle_cooldown=1, verbose=False,
-                              pdf=False, proxy=None, cookies=None)
+                              pdf=False, proxy=None, cookies=None, timestamps=False,
+                              link_timestamps=False, srt=False)
     from tube2note.config import resolve_config
     cfg = resolve_config({}, None)
     assert w._check(["http://ch"], "w.md", cfg, args) == 1
@@ -101,3 +102,47 @@ def test_extras_registry_and_unknown(home, capsys):
     out = cmd_extras([])
     assert out is None
     assert "faster-whisper" in capsys.readouterr().out
+
+
+def test_watch_partial_run_retries(home, monkeypatch):
+    import tube2note.watch as w
+    monkeypatch.setattr(w, "expand", lambda urls, max_n, **k: ([{"id": "v1", "url": "u1"},
+                                                              {"id": "v2", "url": "u2"}], None))
+    monkeypatch.setattr(w, "run_job", lambda *a, **k: {"ok": 1, "skipped": 1, "total": 2})
+    import argparse
+    args = argparse.Namespace(max=30, sleep=0, throttle_cooldown=1, verbose=False,
+                              pdf=False, proxy=None, cookies=None, timestamps=False,
+                              link_timestamps=False, srt=False)
+    from tube2note.config import resolve_config
+    assert w._check(["http://ch"], "w.md", resolve_config({}, None), args) == 1
+    assert w._load_seen(w._state_path(["http://ch"], "w.md")) == set()  # partial: retry next round
+
+
+def test_mcp_nondict_request():
+    from tube2note.mcp import _handle
+    r, _ = _handle([])
+    assert r["error"]["code"] == -32600
+    r, _ = _handle(None)
+    assert r["error"]["code"] == -32600
+
+
+def test_search_bad_encoding_skipped(home):
+    from tube2note.search import search_collections
+    (home / "bad.md").write_bytes(b"# T\n\n\xff\xfe binary \x00 junk hello\n")
+    assert search_collections("hello", str(home)) == 0
+
+
+def test_subs_bom_and_indent(home):
+    from tube2note.subs import load_subs
+    p = home / "subs.yaml"
+    p.write_bytes(b"\xef\xbb\xbf- url: http://a\n  out: a.md\n")
+    assert load_subs(str(p)) == [{"url": "http://a", "out": "a.md"}]
+    p.write_text("  - url: http://b\n    out: b.md\n", encoding="utf-8")
+    assert load_subs(str(p)) == [{"url": "http://b", "out": "b.md"}]
+
+
+def test_ip_blocked_variants():
+    from tube2note.throttle import _is_throttle
+    assert _is_throttle(Exception("IP blocked"))
+    assert _is_throttle(Exception("your IP address has been blocked"))
+    assert not _is_throttle(Exception("video abc429XYZ12 unavailable"))

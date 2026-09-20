@@ -153,6 +153,8 @@ def tui():
         yn = "y" if cfg["timestamps"] else "n"
         ts = input(f"Timestamps? [{yn}] > ").strip().lower()
         ts = cfg["timestamps"] if ts == "" else ts in ("y", "yes")
+        lk = input("Clickable timestamp links? [n] > ").strip().lower() in ("y", "yes")
+        sr = input("Write .srt sidecars? [n] > ").strip().lower() in ("y", "yes")
         cl = input(f"Cleaning? [{'y' if cfg['clean'] else 'n'}] > ").strip().lower()
         cl = cfg["clean"] if cl == "" else cl in ("y", "yes")
         pdf = input("PDF too? [n] > ").strip().lower() in ("y", "yes")
@@ -176,7 +178,8 @@ def tui():
         try:
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
                     layout=lay, template=tmp, pdf=pdf, since=since, profile=prof, workers=wk,
-                    clean=cl, clean_level=cfg["clean_level"])
+                    clean=cl, clean_level=cfg["clean_level"],
+                    link_timestamps=lk, srt=sr)
         except KeyboardInterrupt:
             print("\nCancelled.")
         again = input("\nNew job? [Enter]=yes, q=quit > ").strip()

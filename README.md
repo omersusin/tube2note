@@ -88,8 +88,8 @@ tube2note [URL ...] [options] | status | setup | doctor | widget | share
 | `--max` | 100 | Max videos per run (caps listing time too) |
 | `--since` | — | Only videos on/after `YYYY-MM-DD` |
 | `--timestamps` | off | Keep `[MM:SS]` markers in transcripts |
-| `--link-timestamps` | off | Clickable `[MM:SS](youtu.be?t=Ns)` links (implies timestamps) |
-| `--srt` | off | Write a `.srt` sidecar per video |
+| `--link-timestamps` / `--no-link-timestamps` | off | Clickable `[MM:SS](youtu.be?t=Ns)` links (implies timestamps; `--no-*` turns off on resume) |
+| `--srt` / `--no-srt` | off | Write a `.srt` sidecar per video |
 | `--clean / --no-clean` | on | Clean transcripts / keep raw |
 | `--clean-level` | `full` | `light` (dedup only) or `full` (fillers + repeats + sentences) |
 | `--name-template` | — | Per-video path, e.g. `"{channel}/{title} [{id}]"` (fields: channel, title, id, index, date, lang) |
@@ -293,6 +293,7 @@ Tests run the whole pipeline (and the web UI) offline against a fake yt-dlp in `
 
 ## Changelog
 
+- **0.9.0** — hardening round: watch clean-run-only seen-state, IP-block detection, MCP crash guards, search UTF-8 + limit fix, subs BOM/indent, backend job cap + `?t=` download + `/healthz`, web Timer fix, job try/finally, incomplete-list TTL, VTT poison guard, translate drift warning, cleaner abbreviations + Unicode sentences, link/srt in web UI + TUI + watch, PWA icons + SW registration.
 - **0.8.0** — `--link-timestamps` + `--srt` wired into CLI/API/web/MCP (+resume); backend token fail-closed.
 - **0.7.0** — site backend (`serve-api`, Render/Fly files), site app form + PWA, clickable-timestamp + SRT libraries, `subscriptions.yaml`, Tauri scaffold.
 - **0.6.0** — (rolled into 0.7.0 release) same batch.

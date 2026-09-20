@@ -11,12 +11,14 @@ def search_collections(query, base=".", as_json=False, limit=50):
     hits = []
     base = os.path.expanduser(base)
     for root, _, files in os.walk(base):
+        if len(hits) >= limit:
+            break
         for fn in files:
             if not fn.endswith(".md") or fn == "INDEX.md" or "_part" in fn:
                 continue
             p = os.path.join(root, fn)
             try:
-                lines = open(p, encoding="utf-8").read().splitlines()
+                lines = open(p, encoding="utf-8", errors="ignore").read().splitlines()
             except OSError:
                 continue
             cur_vid, cur_title = "", ""

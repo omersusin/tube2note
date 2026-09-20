@@ -27,7 +27,7 @@ def _is_throttle(e):
         "too many requests",
     )):
         return True
-    return re.search(r"ip address.{0,20}block|block.{0,20}ip", low) is not None
+    return re.search(r"\bip\b.{0,30}\bblock|\bblock.{0,30}\bip\b", low) is not None
 
 
 class Bucket:

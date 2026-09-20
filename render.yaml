@@ -4,7 +4,7 @@ services:
     runtime: docker
     dockerfilePath: Dockerfile.backend
     plan: free
-    healthCheckPath: /api/state
+    healthCheckPath: /healthz
     envVars:
       - {key: PORT, value: 8000}
       - {key: OUT_DIR, value: /tmp/tube2note-out}

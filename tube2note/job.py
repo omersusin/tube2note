@@ -247,176 +247,191 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         print(f"resuming: {len(done)} videos already done", flush=True)
     fresh_start = fresh or not os.path.exists(out)
     mode = "w" if fresh_start else "a"
-    fout = open(out, mode, encoding="utf-8")
-    dlog = open(done_log, "w" if fresh_start else "a", encoding="utf-8")
-    slog = open(skip_log, "w" if fresh_start else "a", encoding="utf-8")
-    wlog = open(out + ".words", "w" if fresh_start else "a", encoding="utf-8")
-    if fresh_start:
-        done = set()
-    if mode == "w":
-        today = datetime.date.today().isoformat()
-        fout.write(f"# YouTube Research Notes\n\n- Date: {today}\n- Videos: target {total}\n"
-                   f"- Languages: {','.join(langs)}\n\nFeed this file to NotebookLM as a source.\n\n---\n\n")
-    todo = max(0, total - len(done))
-    completed = set(done)
-    words_by_id = {}
-    if not fresh_start and os.path.exists(out + ".words"):
-        try:
-            for ln in open(out + ".words", encoding="utf-8"):
-                p = ln.split()
-                if len(p) == 2:
-                    words_by_id[p[0]] = int(p[1])
-        except (OSError, ValueError):
-            pass
-    print(f"target: {todo} videos (chunk: {chunk}, chunk break: {chunk_cooldown // 60} min, layout: {layout})", flush=True)
-    ok, skip, words, consec, since_break, status = 0, [], 0, 0, 0, ""
-    used_paths = set()
-    set_verbose(verbose)
-    t0 = time.time()
-    ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True,
-                "writesubtitles": False, "socket_timeout": 20,
-                "subtitlesformat": "vtt/best",
-                "extractor_args": {"youtube": {"skip": ["translated_subs"]}}}
-    if proxy:
-        ydl_opts["proxy"] = proxy
-    if cookiefile:
-        ydl_opts["cookiefile"] = os.path.expanduser(cookiefile)
-    bucket = Bucket(rate=0.15, capacity=2) if workers > 1 else None
-    work = [(i, v) for i, v in enumerate(videos, 1) if v["id"] not in done]
-    tmpdir = tempfile.mkdtemp(prefix="tube2note-")
-    if workers > 1:
-        print(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
-    with YoutubeDL(ydl_opts):
-        for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap,
-                                clean, clean_level, transcribe, tmpdir, summarize, gemini_model,
-                                engine, translate, proxy, cookiefile):
-            if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
-                if verbose:
-                    log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
-                _countdown(chunk_cooldown, "chunk break", lambda left: dash_update(
-                    ok + len(skip), todo, v["title"], ok, len(skip), words, t0,
-                    status=f"chunk break {left // 60:02d}:{left % 60:02d} left"))
-                status = ""
-                since_break = 0
-            since_break += 1
-            dash_update(ok + len(skip), todo, f"[{i}/{total}] {v['title']}",
-                        ok, len(skip), words, t0, status)
-            if verbose:
-                log(f"[{i}/{total}] {v['title'][:70]}")
-            if res["stage"] == "extract":
-                if verbose:
-                    log(f"  ! skipped: {res['error']}")
-                skip.append((v["title"], v["url"], res["error"]))
-                consec = consec + 1 if res["throttled"] else 0
-                status = "throttled" if res["throttled"] else "extract failed"
-                if consec >= 5:
-                    if verbose:
-                        log("  ! 5 throttles in a row -> long cooldown")
-                    _countdown(throttle_cooldown, "throttle cooldown", lambda left: dash_update(
-                        ok + len(skip), todo, v["title"], ok, len(skip), words, t0,
-                        status=f"throttle cooldown {left // 60:02d}:{left % 60:02d} left"))
-                    consec, status = 0, ""
-                continue
-            title, wurl, lg, auto = res["title"], res["wurl"], res["lg"], res["auto"]
-            if res["stage"] == "subs":
-                if verbose:
-                    log("  ! no subtitles, skipped")
-                skip.append((title, wurl, "no subtitles"))
-                consec, status = 0, "no subtitles"
-                continue
-            text = res["text"]
-            if link_timestamps:
-                text = linkify(text, v["id"])
-            if res.get("cached") and verbose:
-                log("  (from cache)")
-            if text is None:
-                if verbose:
-                    log(f"  ! subtitle download failed: {res['error']}")
-                skip.append((title, wurl, res["error"]))
-                consec = consec + 1 if res["throttled"] else 0
-                status = "throttled" if res["throttled"] else "subtitle failed"
-                if consec >= 5:
-                    if verbose:
-                        log("  ! 5 throttles in a row -> long cooldown")
-                    _countdown(throttle_cooldown, "throttle cooldown", lambda left: dash_update(
-                        ok + len(skip), todo, title, ok, len(skip), words, t0,
-                        status=f"throttle cooldown {left // 60:02d}:{left % 60:02d} left"))
-                    consec, status = 0, ""
-                continue
-            consec, status = 0, ""
-            if len(text) < 50:
-                skip.append((title, wurl, "subtitle too short"))
-                consec, status = 0, "subtitle too short"
-                continue
-            sumblock = f"\n### Summary\n{res['summary']}\n" if res.get("summary") else ""
-            if res.get("summary_error") and verbose:
-                log(f"  ! summary failed: {res['summary_error']}")
-            transblock = ""
-            if res.get("translation"):
-                transblock = f"\n### Translation ({translate})\n{res['translation']}\n"
-            elif res.get("translation_error") and verbose:
-                log(f"  ! translation failed: {res['translation_error']}")
+    fout = dlog = slog = wlog = None
+    try:
+        fout = open(out, mode, encoding="utf-8")
+        dlog = open(done_log, "w" if fresh_start else "a", encoding="utf-8")
+        slog = open(skip_log, "w" if fresh_start else "a", encoding="utf-8")
+        wlog = open(out + ".words", "w" if fresh_start else "a", encoding="utf-8")
+        if fresh_start:
+            done = set()
+        if mode == "w":
+            today = datetime.date.today().isoformat()
+            fout.write(f"# YouTube Research Notes\n\n- Date: {today}\n- Videos: target {total}\n"
+                       f"- Languages: {','.join(langs)}\n\nFeed this file to NotebookLM as a source.\n\n---\n\n")
+        todo = max(0, total - len(done))
+        completed = set(done)
+        words_by_id = {}
+        if not fresh_start and os.path.exists(out + ".words"):
             try:
-                fout.write(f"## {i}. {title}\n\n- Source: {wurl}\n"
-                           f"- Video ID: {v['id']}\n- Subtitle lang: {lg}"
-                           f"{' (transcribed)' if res.get('trans') else (' (auto)' if auto else '')}\n"
-                           f"{sumblock}{transblock}\n{text}\n\n---\n\n")
-                fout.flush()
-                dlog.write(v["id"] + "\n")
-                dlog.flush()
-                ok += 1
-                nwords = len(text.split())
-                words += nwords
-                completed.add(v["id"])
-                done.add(v["id"])
-                words_by_id[v["id"]] = nwords
-                wlog.write(f"{v['id']} {nwords}\n")
-                wlog.flush()
-                if layout != "single":
-                    fields = {"channel": v.get("channel") or res.get("channel") or "channel",
-                              "title": title or v["id"], "id": v["id"],
-                              "index": f"{i:02d}", "date": datetime.date.today().isoformat(),
-                              "lang": lg}
-                    vp = _unique_path(os.path.join(root, render_template(
-                        template or DEFAULT_TEMPLATES[layout], fields)), v["id"], used_paths)
-                    if _existing_vid(vp) not in (None, v["id"]):
-                        # another session's different video owns this path: do not overwrite
-                        base, ext = os.path.splitext(vp)
-                        vp = f"{base}_{v['id']}{ext}"
-                        used_paths.add(vp)
-                    os.makedirs(os.path.dirname(vp), exist_ok=True)
-                    with open(vp, "w", encoding="utf-8") as vf:
-                        vf.write(_frontmatter(title, wurl, v.get("channel") or res.get("channel"),
-                                              v["id"], lg, auto, res.get("meta")))
-                        vf.write(f"## {title}\n")
-                        if res.get("summary"):
-                            vf.write(f"\n### Summary\n{res['summary']}\n")
-                        if res.get("translation"):
-                            vf.write(f"\n### Translation ({translate})\n{res['translation']}\n")
-                        vf.write(f"\n{text}\n")
-                if srt and res.get("segs"):
-                    srt_text = _srt_text(res["segs"])
+                for ln in open(out + ".words", encoding="utf-8"):
+                    p = ln.split()
+                    if len(p) == 2:
+                        words_by_id[p[0]] = int(p[1])
+            except (OSError, ValueError):
+                pass
+        print(f"target: {todo} videos (chunk: {chunk}, chunk break: {chunk_cooldown // 60} min, layout: {layout})", flush=True)
+        ok, skip, words, consec, since_break, status = 0, [], 0, 0, 0, ""
+        used_paths = set()
+        set_verbose(verbose)
+        t0 = time.time()
+        ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True,
+                    "writesubtitles": False, "socket_timeout": 20,
+                    "subtitlesformat": "vtt/best",
+                    "extractor_args": {"youtube": {"skip": ["translated_subs"]}}}
+        if proxy:
+            ydl_opts["proxy"] = proxy
+        if cookiefile:
+            ydl_opts["cookiefile"] = os.path.expanduser(cookiefile)
+        bucket = Bucket(rate=0.15, capacity=2) if workers > 1 else None
+        work = [(i, v) for i, v in enumerate(videos, 1) if v["id"] not in done]
+        tmpdir = tempfile.mkdtemp(prefix="tube2note-")
+        if workers > 1:
+            print(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
+        with YoutubeDL(ydl_opts):
+            for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap,
+                                    clean, clean_level, transcribe, tmpdir, summarize, gemini_model,
+                                    engine, translate, proxy, cookiefile):
+                if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
+                    if verbose:
+                        log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
+                    _countdown(chunk_cooldown, "chunk break", lambda left: dash_update(
+                        ok + len(skip), todo, v["title"], ok, len(skip), words, t0,
+                        status=f"chunk break {left // 60:02d}:{left % 60:02d} left"))
+                    status = ""
+                    since_break = 0
+                since_break += 1
+                dash_update(ok + len(skip), todo, f"[{i}/{total}] {v['title']}",
+                            ok, len(skip), words, t0, status)
+                if verbose:
+                    log(f"[{i}/{total}] {v['title'][:70]}")
+                if res["stage"] == "extract":
+                    if verbose:
+                        log(f"  ! skipped: {res['error']}")
+                    skip.append((v["title"], v["url"], res["error"]))
+                    consec = consec + 1 if res["throttled"] else 0
+                    status = "throttled" if res["throttled"] else "extract failed"
+                    if consec >= 5:
+                        if verbose:
+                            log("  ! 5 throttles in a row -> long cooldown")
+                        _countdown(throttle_cooldown, "throttle cooldown", lambda left: dash_update(
+                            ok + len(skip), todo, v["title"], ok, len(skip), words, t0,
+                            status=f"throttle cooldown {left // 60:02d}:{left % 60:02d} left"))
+                        consec, status = 0, ""
+                    continue
+                title, wurl, lg, auto = res["title"], res["wurl"], res["lg"], res["auto"]
+                if res["stage"] == "subs":
+                    if verbose:
+                        log("  ! no subtitles, skipped")
+                    skip.append((title, wurl, "no subtitles"))
+                    consec, status = 0, "no subtitles"
+                    continue
+                text = res["text"]
+                if link_timestamps:
+                    text = linkify(text, v["id"])
+                if res.get("cached") and verbose:
+                    log("  (from cache)")
+                if text is None:
+                    if verbose:
+                        log(f"  ! subtitle download failed: {res['error']}")
+                    skip.append((title, wurl, res["error"]))
+                    consec = consec + 1 if res["throttled"] else 0
+                    status = "throttled" if res["throttled"] else "subtitle failed"
+                    if consec >= 5:
+                        if verbose:
+                            log("  ! 5 throttles in a row -> long cooldown")
+                        _countdown(throttle_cooldown, "throttle cooldown", lambda left: dash_update(
+                            ok + len(skip), todo, title, ok, len(skip), words, t0,
+                            status=f"throttle cooldown {left // 60:02d}:{left % 60:02d} left"))
+                        consec, status = 0, ""
+                    continue
+                consec, status = 0, ""
+                if len(text) < 50:
+                    skip.append((title, wurl, "subtitle too short"))
+                    consec, status = 0, "subtitle too short"
+                    continue
+                sumblock = f"\n### Summary\n{res['summary']}\n" if res.get("summary") else ""
+                if res.get("summary_error") and verbose:
+                    log(f"  ! summary failed: {res['summary_error']}")
+                transblock = ""
+                if res.get("translation"):
+                    transblock = f"\n### Translation ({translate})\n{res['translation']}\n"
+                elif res.get("translation_error") and verbose:
+                    log(f"  ! translation failed: {res['translation_error']}")
+                try:
+                    fout.write(f"## {i}. {title}\n\n- Source: {wurl}\n"
+                               f"- Video ID: {v['id']}\n- Subtitle lang: {lg}"
+                               f"{' (transcribed)' if res.get('trans') else (' (auto)' if auto else '')}\n"
+                               f"{sumblock}{transblock}\n{text}\n\n---\n\n")
+                    fout.flush()
+                    dlog.write(v["id"] + "\n")
+                    dlog.flush()
+                    ok += 1
+                    nwords = len(text.split())
+                    words += nwords
+                    completed.add(v["id"])
+                    done.add(v["id"])
+                    words_by_id[v["id"]] = nwords
+                    wlog.write(f"{v['id']} {nwords}\n")
+                    wlog.flush()
                     if layout != "single":
-                        srt_path = os.path.splitext(vp)[0] + ".srt"
-                    else:
-                        base = os.path.splitext(os.path.basename(out))[0]
-                        srt_path = os.path.join(root, f"{base}_{v['id']}.srt")
-                    with open(srt_path, "w", encoding="utf-8") as sf:
-                        sf.write(srt_text)
-            except OSError as e:
-                print(red(f"  ! FATAL disk/IO error, stopping: {e}"))
-                raise SystemExit(1)
-            dash_update(ok + len(skip), todo, v["title"], ok, len(skip), words, t0)
-            time.sleep(sleep)
-    dash_update(todo, todo, "done", ok, len(skip), words, t0)
-    dash_end()
-    for t, u, s in skip:
-        slog.write(json.dumps({"title": t, "url": u, "reason": s}, ensure_ascii=False) + "\n")
-    fout.close()
-    dlog.close()
-    slog.close()
-    wlog.close()
-    shutil.rmtree(tmpdir, ignore_errors=True)
+                        fields = {"channel": v.get("channel") or res.get("channel") or "channel",
+                                  "title": title or v["id"], "id": v["id"],
+                                  "index": f"{i:02d}", "date": datetime.date.today().isoformat(),
+                                  "lang": lg}
+                        vp = _unique_path(os.path.join(root, render_template(
+                            template or DEFAULT_TEMPLATES[layout], fields)), v["id"], used_paths)
+                        if _existing_vid(vp) not in (None, v["id"]):
+                            # another session's different video owns this path: do not overwrite
+                            base, ext = os.path.splitext(vp)
+                            vp = f"{base}_{v['id']}{ext}"
+                            used_paths.add(vp)
+                        os.makedirs(os.path.dirname(vp), exist_ok=True)
+                        with open(vp, "w", encoding="utf-8") as vf:
+                            vf.write(_frontmatter(title, wurl, v.get("channel") or res.get("channel"),
+                                                  v["id"], lg, auto, res.get("meta")))
+                            vf.write(f"## {title}\n")
+                            if res.get("summary"):
+                                vf.write(f"\n### Summary\n{res['summary']}\n")
+                            if res.get("translation"):
+                                vf.write(f"\n### Translation ({translate})\n{res['translation']}\n")
+                            vf.write(f"\n{text}\n")
+                    if srt and res.get("segs"):
+                        srt_text = _srt_text(res["segs"])
+                        if layout != "single":
+                            srt_path = os.path.splitext(vp)[0] + ".srt"
+                        else:
+                            base = os.path.splitext(os.path.basename(out))[0]
+                            srt_path = os.path.join(root, f"{base}_{v['id']}.srt")
+                        with open(srt_path, "w", encoding="utf-8") as sf:
+                            sf.write(srt_text)
+                    elif srt and verbose:
+                        log("  (no .srt: transcribed videos carry no timings)")
+                except OSError as e:
+                    print(red(f"  ! FATAL disk/IO error, stopping: {e}"))
+                    raise SystemExit(1)
+                dash_update(ok + len(skip), todo, v["title"], ok, len(skip), words, t0)
+                time.sleep(sleep)
+        dash_update(todo, todo, "done", ok, len(skip), words, t0)
+        dash_end()
+        for t, u, s in skip:
+            slog.write(json.dumps({"title": t, "url": u, "reason": s}, ensure_ascii=False) + "\n")
+        fout.close()
+        dlog.close()
+        slog.close()
+        wlog.close()
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    finally:  # Ctrl+C / SystemExit mid-run: never leak handles or temp audio
+        for _f in (fout, dlog, slog, wlog):
+            try:
+                if _f is not None:
+                    _f.close()
+            except Exception:
+                pass
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except NameError:
+            pass
     if layout != "single":
         _write_index(root, videos, completed, words_by_id, skip_log)
         print(f"index: {os.path.join(root, 'INDEX.md')}", flush=True)

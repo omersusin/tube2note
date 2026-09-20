@@ -27,11 +27,12 @@ def vtt_segments(vtt: str):
     # everything before the first cue timing line is header: the WEBVTT signature
     # plus YouTube's "Kind: captions" / "Language: en" metadata, never transcript
     in_header = bool(lines) and lines[0].lstrip("﻿").strip().startswith("WEBVTT")
-    segs, start = [], 0.0
+    segs, start, saw_cue = [], 0.0, False
     for idx, block in enumerate(lines):
         s = block.strip()
         if "-->" in s:
             in_header = False
+            saw_cue = True
             start = _to_secs(s.split("-->")[0])
             continue
         if in_header or not s or s.startswith(("NOTE", "STYLE", "REGION")):
@@ -42,6 +43,8 @@ def vtt_segments(vtt: str):
         s = html.unescape(s).replace(" ", " ").strip()
         if s and (not segs or segs[-1][1] != s):  # drop back-to-back duplicates from auto captions
             segs.append((start, s))
+    if not saw_cue:
+        return []  # not a transcript at all (corrupt cache, error page): never poison output
     return segs
 
 

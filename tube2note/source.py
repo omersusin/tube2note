@@ -56,6 +56,7 @@ def _flatten(ydl, info, out, limit, depth=0, since_ts=0):
 
 
 _LIST_TTL = 6 * 3600
+_LIST_INCOMPLETE_TTL = 30 * 60  # growing playlists refetch sooner; a cached "5 videos" must not stick 6h
 
 
 def _list_cache_path(urls, since):
@@ -68,7 +69,9 @@ def _list_cache_path(urls, since):
 def _list_load(urls, max_n, since):
     try:
         d = json.load(open(_list_cache_path(urls, since), encoding="utf-8"))
-        if (time.time() - d.get("ts", 0) < _LIST_TTL and isinstance(d.get("videos"), list)
+        age = time.time() - d.get("ts", 0)
+        ttl = _LIST_TTL if d.get("complete") else _LIST_INCOMPLETE_TTL
+        if (age < ttl and isinstance(d.get("videos"), list)
                 and (d.get("complete") or d.get("max_n", 0) >= max_n)):
             return d["videos"][:max_n], d.get("hint")
     except (OSError, ValueError, TypeError, KeyError):
@@ -202,11 +205,16 @@ def _get_vtt(vid, lg, auto, fmts, opener, fetch_gap=10):
     p = _cache_path(vid, lg, auto)
     if os.path.exists(p):
         try:
-            return open(p, encoding="utf-8").read(), True
+            cached = open(p, encoding="utf-8").read()
+            if "-->" in cached:
+                return cached, True
+            os.unlink(p)  # poisoned cache (error page, not captions): refetch
         except OSError:
             pass
     time.sleep(random.uniform(1, max(1, fetch_gap)))  # pace timedtext fetches only
     vtt = fetch_vtt(fmts, opener)
+    if "-->" not in vtt:
+        return vtt, False  # not captions: don't cache poison, caller skips the video
     try:
         os.makedirs(os.path.dirname(p), exist_ok=True)
         open(p, "w", encoding="utf-8").write(vtt)

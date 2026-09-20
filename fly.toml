@@ -8,4 +8,4 @@ cpu_kind = "shared"
 cpus = 1
 memory_mb = 512
 [env]
-OUT_DIR = "/data"
+OUT_DIR = "/tmp/tube2note-out"

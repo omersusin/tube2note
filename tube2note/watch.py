@@ -50,14 +50,18 @@ def _check(urls, out, cfg, args):
         print(f"watch: no new videos ({len(videos)} listed, all seen).")
         return 0
     print(f"watch: {len(fresh)} new video(s): " + ", ".join(v.get("title", v["id"])[:50] for v in fresh[:5]))
-    res = run_job([v["url"] for v in fresh], out, cfg["lang"], len(fresh), args.sleep,
-                  False, cfg["chunk"], cfg["chunk_cooldown_min"] * 60, args.throttle_cooldown,
-                  videos=fresh, outdir=cfg["outdir"], ts=cfg["timestamps"],
-                  verbose=args.verbose, layout=cfg["layout"], template=cfg["template"],
-                  pdf=args.pdf, proxy=args.proxy, cookiefile=args.cookies,
-                  clean=cfg["clean"], clean_level=cfg["clean_level"])
-    if (res or {}).get("total", 0) > 0:  # empty result = fatal (throttled out): retry next round
+    res = (run_job([v["url"] for v in fresh], out, cfg["lang"], len(fresh), args.sleep,
+                   False, cfg["chunk"], cfg["chunk_cooldown_min"] * 60, args.throttle_cooldown,
+                   videos=fresh, outdir=cfg["outdir"], ts=cfg["timestamps"] or args.timestamps,
+                   verbose=args.verbose, layout=cfg["layout"], template=cfg["template"],
+                   pdf=args.pdf, proxy=args.proxy, cookiefile=args.cookies,
+                   clean=cfg["clean"], clean_level=cfg["clean_level"],
+                   link_timestamps=args.link_timestamps, srt=args.srt) or {})
+    # save seen ONLY on a clean run: partial runs retry next round (.done makes it cheap)
+    if res.get("total", 0) > 0 and res.get("skipped", 1) == 0:
         _save_seen(path, seen | {v.get("id") for v in videos if v.get("id")})
+    elif res.get("ok", 0) > 0:
+        print("watch: partial run, will retry skipped videos next round.")
     return _exit_code(res)
 
 
@@ -76,6 +80,9 @@ def cmd_watch(argv):
     ap.add_argument("--layout", default=None)
     ap.add_argument("--lang", default=None)
     ap.add_argument("--no-clean", dest="clean", action="store_false")
+    ap.add_argument("--timestamps", action="store_true")
+    ap.add_argument("--link-timestamps", action="store_true")
+    ap.add_argument("--srt", action="store_true")
     ap.add_argument("--proxy", default=None)
     ap.add_argument("--cookies", default=None)
     ap.add_argument("--pdf", action="store_true")

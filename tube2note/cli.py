@@ -91,8 +91,14 @@ def main():
     ap.add_argument("-d", "--dir", default=None, help="output folder (created if missing)")
     ap.add_argument("--layout", default=None, help="output layout: single, videos or tree")
     ap.add_argument("--timestamps", action="store_true", default=None, help="keep [MM:SS] markers in transcripts")
-    ap.add_argument("--link-timestamps", action="store_true", help="clickable [MM:SS](youtu.be?t=Ns) links (implies timestamps)")
-    ap.add_argument("--srt", action="store_true", help="write a .srt sidecar per video")
+    ap.add_argument("--link-timestamps", dest="link_timestamps", action="store_true", default=None,
+                    help="clickable [MM:SS](youtu.be?t=Ns) links (implies timestamps)")
+    ap.add_argument("--no-link-timestamps", dest="link_timestamps", action="store_false",
+                    help="turn off clickable links (e.g. on --resume-last)")
+    ap.add_argument("--srt", dest="srt", action="store_true", default=None,
+                    help="write a .srt sidecar per video")
+    ap.add_argument("--no-srt", dest="srt", action="store_false",
+                    help="turn off .srt (e.g. on --resume-last)")
     ap.add_argument("--clean", dest="clean", action="store_true", default=None, help="clean transcripts (default on)")
     ap.add_argument("--no-clean", dest="clean", action="store_false", help="keep raw transcripts")
     ap.add_argument("--clean-level", default=None, help="cleaning strength: light or full (default full)")
@@ -168,14 +174,16 @@ def main():
                 since=(a.since or last.get("since")),
                 translate=(a.translate or last.get("translate")),
                 clean=last.get("clean", True), clean_level=(a.clean_level or last.get("clean_level", "full")),
-                link_timestamps=(a.link_timestamps or last.get("link_timestamps", False)),
-                srt=(a.srt or last.get("srt", False)),
+                link_timestamps=(a.link_timestamps if a.link_timestamps is not None
+                                 else last.get("link_timestamps", False)),
+                srt=(a.srt if a.srt is not None else last.get("srt", False)),
                 transcribe=(a.transcribe or last.get("transcribe", False)),
                 summarize=(a.summarize or last.get("summarize", False)),
                 gemini_model=(a.gemini_model or last.get("gemini_model")),
                 engine=getattr(a, "engine", "api") if getattr(a, "engine", "api") != "api" else last.get("engine", "api"),
                 fetch_gap=(a.fetch_gap if a.fetch_gap is not None else last.get("fetch_gap", 10)),
-                workers=(a.workers if a.workers not in (None, 1) else last.get("workers", 1))))
+                workers=(a.workers if a.workers not in (None, 1) else last.get("workers", 1)),
+                profile=profile, auto_yes=a.yes))
     return _exit_code(run_job(a.urls, a.out, cfg["lang"], a.max, a.sleep, a.fresh, cfg["chunk"],
             cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
             ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
@@ -186,4 +194,4 @@ def main():
             transcribe=a.transcribe, summarize=a.summarize,
             gemini_model=a.gemini_model or _GEMINI_MODEL, engine=a.engine,
             translate=a.translate, auto_yes=a.yes,
-            link_timestamps=a.link_timestamps, srt=a.srt))
+            link_timestamps=bool(a.link_timestamps), srt=bool(a.srt)))

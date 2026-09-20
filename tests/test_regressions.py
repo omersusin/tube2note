@@ -40,7 +40,7 @@ def test_nbsp_becomes_space():
 
 
 def test_non_vtt_input_is_not_swallowed():
-    assert vtt_segments("just some text") == [(0.0, "just some text")]
+    assert vtt_segments("just some text") == []  # corrupt cache must refetch, never poison output
 
 
 def test_parallel_workers_write_every_video(run, home):

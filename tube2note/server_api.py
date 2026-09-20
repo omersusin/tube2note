@@ -24,6 +24,7 @@ if not TOK:  # fail closed: random per-boot token, like `serve` (never run open)
 BASE = os.path.abspath(os.environ.get("OUT_DIR", "tube2note-out"))
 HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 JOBS = {}  # ip -> (Job, timestamp)
+MAX_JOBS = int(os.environ.get("BACKEND_MAX_JOBS", "4"))  # global cap: no fork-bombs via spoofed IP headers
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"],
@@ -80,6 +81,9 @@ async def start(req: Request, x_token: str | None = Header(None)):
         JOBS.pop(k, None)
     if _live(JOBS.get(ip)):
         raise HTTPException(409, "job already running")
+    live = sum(1 for j in JOBS.values() if _live(j))
+    if live >= MAX_JOBS:
+        raise HTTPException(503, "server busy, try again later")
     try:
         argv = build_argv(p, BASE)
     except ValueError as e:
@@ -103,12 +107,17 @@ def state(req: Request, x_token: str | None = Header(None)):
     return {"job": j[0].snapshot() if j else None, "files": list_files(BASE)}
 
 @app.get("/api/download")
-def dl(path: str, x_token: str | None = Header(None)):
-    _auth(x_token)
+def dl(path: str, t: str | None = None, x_token: str | None = Header(None)):
+    _auth(t or x_token)  # browsers can't set headers on <a> navigation: ?t= fallback
     full = resolve_served(BASE, path)
     if not full:
         raise HTTPException(404, "not found")
     return FileResponse(full)
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
 
 def main():
     import uvicorn

@@ -80,6 +80,9 @@ def _call(name, args):
 
 def _handle(req):
     """Pure dispatch (unit-testable): (response_dict_or_None, shutdown_bool)."""
+    if not isinstance(req, dict):
+        return {"jsonrpc": "2.0", "id": None,
+                "error": {"code": -32600, "message": "invalid request: object expected"}}, False
     rid, method, params = req.get("id"), req.get("method"), req.get("params") or {}
     if method in ("notifications/initialized", "notifications/cancelled"):
         return None, False
@@ -95,8 +98,9 @@ def _handle(req):
     if method == "tools/call":
         try:
             return {"jsonrpc": "2.0", "id": rid,
-                    "result": _call(params.get("name"), params.get("arguments"))}, False
-        except Exception as e:
+                    "result": _call(params.get("name") if isinstance(params, dict) else None,
+                                    params.get("arguments") if isinstance(params, dict) else None)}, False
+        except (Exception, SystemExit) as e:  # SystemExit: disk-full etc. must not kill the server
             return {"jsonrpc": "2.0", "id": rid,
                     "result": {"content": [{"type": "text", "text": f"error: {e}"}],
                                "isError": True}}, False

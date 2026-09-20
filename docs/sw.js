@@ -1,5 +1,6 @@
-const CACHE = "tube2note-v070";
-const SHELL = ["./index.html", "./app.html", "./app.js", "./manifest.webmanifest"];
+const CACHE = "tube2note-v090";
+const SHELL = ["./index.html", "./app.html", "./app.js", "./manifest.webmanifest",
+               "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });

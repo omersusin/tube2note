@@ -13,16 +13,16 @@ def load_subs(path="subscriptions.yaml"):
     if not os.path.exists(path):
         return []
     subs, cur = [], {}
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:  # -sig: tolerate Windows Notepad BOM
         for raw in f:
             ln = raw.rstrip("\n")
             if not ln.strip() or ln.strip().startswith("#"):
                 continue
-            if ln.startswith("- "):
+            if ln.lstrip().startswith("- "):  # tolerate indented list items
                 if cur.get("url"):
                     subs.append(cur)
                 cur = {}
-                rest = ln[2:].strip()
+                rest = ln.lstrip()[2:].strip()
                 if ":" in rest:
                     k, v = rest.split(":", 1)
                     cur[k.strip()] = v.strip().strip("\"'")

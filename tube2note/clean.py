@@ -13,13 +13,13 @@ _FILLER_CACHE = {}
 DUP_MAX_WORDS = 6  # longest repeated phrase we collapse ("you know you know")
 
 
-ABBR_RE = re.compile(r"\b(Mr|Mrs|Dr|Jr|St)\.")
+ABBR_RE = re.compile(r"\b(Mr|Mrs|Dr|Jr|St|Sr|Sgt|Prof|vs|etc|[Ee]\.g|[Ii]\.e)\.")
 
 
 NUMDOT_RE = re.compile(r"(\d)\.(\d)")
 
 
-SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-ZİŞĞÜÖÇ0-9\"“])")
+SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[\"“]?[^\W\d_])")  # any Unicode letter (Cyrillic/Greek/Arabic…)
 
 
 def _filler_re(lang):

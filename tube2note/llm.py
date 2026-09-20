@@ -128,6 +128,10 @@ def _translate_chunks(text, target, model, budget=4000):
             elif cur is not None and ln.strip():
                 lines[cur] += "\n" + ln.strip()  # model wrapped one paragraph over lines
         out.append("\n\n".join(lines.get(i, c[i]) for i in range(len(c))))
+        missing = [i for i in range(len(c)) if i not in lines]
+        if missing:
+            print(f"  ! translate: {len(missing)} paragraph(s) lost [N] markers, kept source text",
+                  flush=True)
     return "\n\n".join(out)
 
 
