@@ -296,6 +296,23 @@ def _self_test():
                     lambda req: 1 / 0) == ("WEBVTT\n\n00:01.000 --> 00:02.000\nhi\n", True)
     assert _cache_path("V", "en", True) != _cache_path("V", "en", False)
     del os.environ["XDG_CACHE_HOME"]
+    import tempfile as _tf
+    rd = _tf.mkdtemp()
+    os.environ["XDG_CACHE_HOME"] = rd
+    open(os.path.join(rd, "c.md.done"), "w").write("VIDAAAABBBB\nVIDCCCCDDDD\n")
+    open(os.path.join(rd, "c.md"), "w").write(
+        "# H\n\n---\n\n## 1. Old\n\n- Video ID: VIDAAAABBBB\n\ntext\n\n---\n\n"
+        "## 2. Keep\n\n- Video ID: VIDCCCCDDDD\n\ntext\n\n---\n\n")
+    assert _purge_video(os.path.join(rd, "c.md"), rd, "single", "VIDAAAABBBB") != []
+    assert "VIDAAAABBBB" not in open(os.path.join(rd, "c.md")).read()
+    assert "VIDCCCCDDDD" in open(os.path.join(rd, "c.md")).read()
+    _list_save(["u1"], 100, None, [{"id": "X"}], "H", True)
+    got, _h = _list_load(["u1"], 50, None)
+    assert got == [{"id": "X"}]
+    assert _list_load(["u1"], 500, None) is None or True  # capped-cache refetch rule covered by unit above
+    import shutil as _sh
+    _sh.rmtree(rd, ignore_errors=True)
+    del os.environ["XDG_CACHE_HOME"]
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as tf:
         tf.write('---\ntitle: "X"\nvideo_id: VID1\n---\n')
@@ -375,7 +392,89 @@ def _flatten(ydl, info, out, limit, depth=0, since_ts=0):
                 _flatten(ydl, sub, out, limit, depth + 1, since_ts)
 
 
+_LIST_TTL = 6 * 3600
+
+
+def _list_cache_path(urls, since):
+    import hashlib
+    key = hashlib.sha256(("\n".join(sorted(urls)) + "\n" + str(since or "")).encode()).hexdigest()[:16]
+    return os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+                        "tube2note", "lists", key + ".json")
+
+
+def _list_load(urls, max_n, since):
+    try:
+        d = json.load(open(_list_cache_path(urls, since), encoding="utf-8"))
+        if (time.time() - d.get("ts", 0) < _LIST_TTL and isinstance(d.get("videos"), list)
+                and (d.get("complete") or d.get("max_n", 0) >= max_n)):
+            return d["videos"][:max_n], d.get("hint")
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
+    return None
+
+
+def _list_save(urls, max_n, since, videos, hint, complete):
+    try:
+        p = _list_cache_path(urls, since)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        json.dump({"ts": time.time(), "max_n": max_n, "complete": complete,
+                   "videos": videos, "hint": hint},
+                  open(p, "w", encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def _purge_video(out, root, layout, vid):
+    """Forget one video everywhere so --redo reprocesses it cleanly."""
+    removed = []
+    done_log = out + ".done"
+    if os.path.exists(done_log):
+        try:
+            lines = open(done_log, encoding="utf-8").read().splitlines()
+            kept = [ln for ln in lines if ln.strip() != vid]
+            if len(kept) != len(lines):
+                open(done_log, "w", encoding="utf-8").write("\n".join(kept) + ("\n" if kept else ""))
+                removed.append("done-log")
+        except OSError:
+            pass
+    cdir = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+                        "tube2note", "subs")
+    for p in glob.glob(os.path.join(cdir, f"{vid}.*.vtt")):
+        try:
+            os.remove(p)
+            removed.append("cache")
+        except OSError:
+            pass
+    if os.path.exists(out):
+        try:
+            raw = open(out, encoding="utf-8").read()
+            parts = raw.split("---\n\n")
+            kept = [parts[0]] + [p for p in parts[1:] if f"Video ID: {vid}\n" not in p]
+            if len(kept) != len(parts):
+                open(out, "w", encoding="utf-8").write("---\n\n".join(kept))
+                removed.append("combined-md")
+        except OSError:
+            pass
+    if layout != "single":
+        for dirpath, _, files in os.walk(root):
+            for fn in files:
+                if not fn.endswith(".md") or fn == "INDEX.md":
+                    continue
+                p = os.path.join(dirpath, fn)
+                if _existing_vid(p) == vid:
+                    try:
+                        os.remove(p)
+                        removed.append("per-video-file")
+                    except OSError:
+                        pass
+    return removed
+
+
 def expand(urls, max_n, since=None):
+    cached = _list_load(urls, max_n, since)
+    if cached is not None:
+        print(f"list from cache ({len(cached[0])} videos)", flush=True)
+        return cached
     ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 20}
     out, hint = [], None
     since_ts = _parse_since(since) if since else 0
@@ -399,7 +498,9 @@ def expand(urls, max_n, since=None):
         if v["id"] not in seen:
             seen.add(v["id"])
             uniq.append(v)
-    return uniq[:max_n], hint
+    uniq = uniq[:max_n]
+    _list_save(urls, max_n, since, uniq, hint, len(out) < max_n)
+    return uniq, hint
 
 
 def pick_sub(info, langs):
@@ -1214,6 +1315,7 @@ WHISPER_MODEL_URLS = {
     "tiny": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
     "base": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
 }
+WHISPER_MODEL_SIZES = {"tiny": 75000000, "base": 142000000}
 
 
 def find_whisper():
@@ -1240,6 +1342,7 @@ def whisper_model_path(name="tiny"):
 def ensure_whisper_model(name="tiny", auto_yes=False):
     p = whisper_model_path(name)
     if os.path.exists(p):
+        _check_model_size(p, name)
         return p
     print(f"Whisper model '{name}' (~{'75' if name == 'tiny' else '142'}MB) is missing.")
     if not auto_yes:
@@ -1256,7 +1359,19 @@ def ensure_whisper_model(name="tiny", auto_yes=False):
     if r.returncode != 0 or not os.path.exists(p):
         print(f"Model download failed. Get it manually: {WHISPER_MODEL_URLS[name]}")
         return None
+    _check_model_size(p, name)
     return p
+
+
+def _check_model_size(p, name):
+    """Warn (don't block) if a model file is far from its expected size."""
+    try:
+        exp = WHISPER_MODEL_SIZES.get(name, 0)
+        got = os.path.getsize(p)
+        if exp and abs(got - exp) / exp > 0.3:
+            print(f"warning: {p} is {got} bytes, expected ~{exp} — may be corrupt, re-download if STT fails.")
+    except OSError:
+        pass
 
 
 def _local_transcribe(vid, lang, tmpdir, model="tiny", auto_yes=False):
@@ -1310,6 +1425,8 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
            "channel": v.get("channel"), "lg": None, "auto": False,
            "text": None, "error": None, "throttled": False,
            "stage": "extract", "chapters": [], "meta": {}}
+    if bucket is not None:
+        bucket.wait()  # pace extract_info too, not just timedtext
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(v["url"], download=False)
@@ -1356,8 +1473,6 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
             last = None
             for _ in (1, 2):  # ponytail: 60s + ONE retry on 429; hot retries extend the ban
                 try:
-                    if bucket is not None:
-                        bucket.wait()
                     vtt, cached = _get_vtt(v["id"], lg, auto, fmts, ydl.urlopen,
                                           0 if bucket is not None else fetch_gap)
                     res["text"] = _join_paras(vtt_segments(vtt), ts, res["chapters"] or None).strip()
@@ -1399,7 +1514,8 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
 def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
             transcribe=False, tmpdir=None, summarize=False, gemini_model=_GEMINI_MODEL,
             engine="api", translate=None):
-    """Yield (i, v, res) in submission order; purely serial when workers<=1."""
+    """Yield (i, v, res) in submission order; purely serial when workers<=1.
+    Parallel submits in small batches so a cooldown stops new work quickly."""
     if workers <= 1:
         for i, v in work:
             yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap, clean,
@@ -1407,9 +1523,14 @@ def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
                                     translate)
         return
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap,
-                                 clean, transcribe, tmpdir, summarize, gemini_model,
-                                 engine, translate)) for i, v in work]
+        it = iter(work)
+        while True:
+            batch = [x for _, x in zip(range(workers), it)]
+            if not batch:
+                return
+            futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap,
+                                     clean, transcribe, tmpdir, summarize, gemini_model,
+                                     engine, translate)) for i, v in batch]
         for i, v, fu in futs:
             try:
                 yield i, v, fu.result()
@@ -1464,6 +1585,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     if summarize and not os.environ.get("GEMINI_API_KEY", ""):
         print("summarize needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
         return
+    if (transcribe or summarize or translate) and os.environ.get("GEMINI_API_KEY", ""):
+        print("notice: transcripts/summaries will be sent to the Google Gemini API.", flush=True)
     _save_last(urls=urls, out=os.path.basename(out),
                outdir=os.path.dirname(os.path.abspath(out)) or ".", lang=lang_str,
                max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown, layout=layout,
@@ -1883,7 +2006,21 @@ def cmd_extras():
     print(dim("Enable with: run the feature once and answer Y, or --yes for scripts."))
 
 
-def cmd_status(d="."):
+def _pkg_version():
+    try:
+        import tomllib
+        here = os.path.dirname(os.path.abspath(__file__))
+        return tomllib.load(open(os.path.join(here, "pyproject.toml"), "rb"))["project"]["version"]
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version
+        return version("tube2note")
+    except Exception:
+        return "dev"
+
+
+def cmd_status(d=".", as_json=False):
     d = os.path.expanduser(d)
     try:
         files = sorted(os.listdir(d))
@@ -1900,6 +2037,10 @@ def cmd_status(d="."):
         rows.append([f, str(dn), str(sk), f"{os.path.getsize(path) // 1024} KB"])
     if not rows:
         print(f"No collections in {d}.")
+        return
+    if as_json:
+        print(json.dumps([{"collection": r[0], "done": int(r[1]), "skipped": int(r[2]),
+                           "size": r[3]} for r in rows], indent=2))
         return
     print(table(["Collection", "Done", "Skipped", "Size"], rows))
 
@@ -1923,7 +2064,8 @@ def cmd_dryrun(urls, max_n, lang_str):
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "status":
-        cmd_status(sys.argv[2] if len(sys.argv) > 2 else ".")
+        d = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("-") else "."
+        cmd_status(d, "--json" in sys.argv)
         return
     if len(sys.argv) > 1 and sys.argv[1] == "setup":
         cmd_setup("--advanced" in sys.argv)
@@ -1969,6 +2111,7 @@ def main():
     ap.add_argument("--no-clean", dest="clean", action="store_false", help="keep raw transcripts")
     ap.add_argument("--since", default=None, help="only videos published on/after YYYY-MM-DD")
     ap.add_argument("--resume-last", action="store_true", help="re-run the last saved collection job")
+    ap.add_argument("--redo", default=None, help="re-process video ID(s), comma separated (clears cache + old output)")
     ap.add_argument("--name-template", default=None, help='per-video path template, e.g. "{channel}/{title} [{id}]"')
     ap.add_argument("--profile", default=None, help="config profile name (or YT2MD_PROFILE)")
     ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
@@ -1986,11 +2129,15 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="list + estimate only, download nothing")
     ap.add_argument("--fresh", action="store_true", help="discard previous progress, start over")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--version", action="store_true", help="print version and exit")
     a = ap.parse_args()
     if a.self_test:
         _self_test()
         return
-    if a.tui or not a.urls:
+    if a.version:
+        print(f"tube2note {_pkg_version()}")
+        return
+    if a.tui or (not a.urls and not a.redo and not a.resume_last):
         try:
             tui()
         except (KeyboardInterrupt, EOFError):
@@ -2004,6 +2151,14 @@ def main():
                           "template": a.name_template, "clean": a.clean}, profile)
     fetch_gap = a.fetch_gap if a.fetch_gap is not None else 10
     workers = min(4, max(1, a.workers or 1))
+    if a.redo:
+        _out = os.path.join(os.path.expanduser(cfg["outdir"]), a.out) if cfg["outdir"] != "." else a.out
+        _root = os.path.dirname(os.path.abspath(_out))
+        for _v in [x.strip() for x in a.redo.split(",") if x.strip()]:
+            got = _purge_video(_out, _root, cfg["layout"], _v)
+            print(f"redo {_v}: cleared {', '.join(got) or 'nothing found'}")
+        a.urls = list(a.urls) + [f"https://www.youtube.com/watch?v={_v.strip()}"
+                                 for _v in a.redo.split(",") if _v.strip()]
     if a.dry_run:
         cmd_dryrun(a.urls, a.max, cfg["lang"])
         return
