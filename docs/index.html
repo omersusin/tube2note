@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tube2note — YouTube → Markdown for NotebookLM</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2em auto; padding: 0 1em; line-height: 1.6; }
+  pre { background: #f4f4f4; padding: 1em; border-radius: 8px; overflow-x: auto; }
+  .cta a { display: inline-block; margin-right: 1em; padding: .6em 1.2em; background: #0969da; color: #fff;
+           border-radius: 8px; text-decoration: none; }
+</style>
+</head>
+<body>
+<h1>tube2note — YouTube → Markdown for NotebookLM</h1>
+<p>Turn a channel, playlist, or videos into <strong>Markdown + PDF</strong> files ready for NotebookLM.
+Single-file Python, resumable, polite to YouTube's rate limits.</p>
+<div class="cta">
+  <a href="https://github.com/omersusin/tube2note">GitHub</a>
+  <a href="https://pypi.org/project/tube2note/">PyPI</a>
+</div>
+<h2>Install</h2>
+<pre>pip install tube2note yt-dlp
+tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"</pre>
+<h2>Why</h2>
+<ul>
+  <li>NotebookLM caps YouTube imports (~100 videos) — tube2note merges everything.</li>
+  <li>500k-word auto-split, timestamps, chapters, per-video files, resume.</li>
+  <li>Guided TUI, web UI, profiles, PDF export, Gemini summaries.</li>
+</ul>
+<h2>Links</h2>
+<ul>
+  <li><a href="https://github.com/omersusin/tube2note">Source + docs</a></li>
+  <li><a href="https://pypi.org/project/tube2note/">pip install tube2note</a></li>
+</ul>
+</body>
+</html>

@@ -250,9 +250,11 @@ def resolve_served(base_dir, rel):
 # --------------------------------------------------------------------------- HTTP
 
 class App:
-    def __init__(self, base_dir, token, host, port, argv_builder=build_argv, defaults=None):
+    def __init__(self, base_dir, token, host, port, argv_builder=build_argv, defaults=None,
+                 public=False):
         self.base_dir = os.path.abspath(base_dir)
         self.token, self.host, self.port = token, host, port
+        self.public = public
         self.argv_builder = argv_builder
         self.defaults = defaults or {}
         self.job = None
@@ -336,6 +338,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return ""
 
     def _authed(self):
+        if getattr(self.app, "public", False):
+            return True
         return secrets.compare_digest(self._cookie_token().encode(), self.app.token.encode())
 
     # -- routes
@@ -419,7 +423,8 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
-def make_server(base_dir, host="127.0.0.1", port=8765, token=None, argv_builder=build_argv, defaults=None):
+def make_server(base_dir, host="127.0.0.1", port=8765, token=None, argv_builder=build_argv, defaults=None,
+                public=False):
     token = token or secrets.token_urlsafe(18)
     last = None
     for p in ([port] if port == 0 else range(port, port + 10)):
@@ -430,7 +435,8 @@ def make_server(base_dir, host="127.0.0.1", port=8765, token=None, argv_builder=
             last = e
     else:
         raise last
-    srv.app = App(base_dir, token, host, srv.server_address[1], argv_builder, defaults)
+    srv.app = App(base_dir, token, host, srv.server_address[1], argv_builder, defaults,
+                  public=public)
     return srv
 
 
@@ -453,12 +459,13 @@ def cmd_serve(argv):
     ap.add_argument("-d", "--dir", default=None, help="output folder (default: your configured folder, or ./tube2note-out)")
     ap.add_argument("--no-open", action="store_true", help="do not open a browser")
     ap.add_argument("--token", default=None, help="fixed access token (default: random per launch)")
+    ap.add_argument("--public", action="store_true", help="no token required (only for public demos you trust)")
     a = ap.parse_args(argv)
     cfg = resolve_config()
     base = os.path.expanduser(a.dir or (cfg["outdir"] if cfg["outdir"] != "." else "tube2note-out"))
     defaults = {"lang": cfg.get("lang") or "", "layout": cfg.get("layout") or "single",
                 "timestamps": bool(cfg.get("timestamps")), "clean": cfg.get("clean") is not False}
-    srv = make_server(base, a.host, a.port, a.token, defaults=defaults)
+    srv = make_server(base, a.host, a.port, a.token, defaults=defaults, public=a.public)
     shown = "127.0.0.1" if a.host in ("0.0.0.0", "::", "") else a.host
     url = f"http://{shown}:{srv.app.port}/?t={srv.app.token}"
     print(f"tube2note web UI  ->  {url}")
