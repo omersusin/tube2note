@@ -260,7 +260,11 @@ def _self_test():
     assert render_template("{channel}/{title} [{id}]", {"channel": "C", "title": "T", "id": "ID1"}) == "C/T [ID1].md"
     assert render_template("{nope}/x", {"a": "b"}) == "x.md"
     assert _unique_path("a/b.md", "ID1", {"a/b.md"}) == "a/b_ID1.md"
-    assert _clean_text("eee hello um world world") == "hello world"
+    assert _clean_text("um hello world world", "en") == "hello world"
+    assert _clean_text("eee merhaba ee dünya", "tr") == "merhaba dünya"
+    assert _clean_text("Er ist um drei Uhr zurück.", "de") == "Er ist um drei Uhr zurück."  # no German fillers
+    assert _clean_text("you know you know it works", "en") == "you know it works"
+    assert _clean_text("Er ist um drei Uhr zurück.") == "Er ist um drei Uhr zurück."  # unknown lang: keep words
     try:
         _gemini_transcribe(b"x", "audio/mp3", "en")
         raise AssertionError("should need key")
@@ -1151,25 +1155,60 @@ def _get_vtt(vid, lg, auto, fmts, opener, fetch_gap=10):
     return vtt, False
 
 
-FILLER_RE = re.compile(r"\b(um|uh|er|ah|mm|hmm|eee|ee|ıı)\b", re.IGNORECASE)
-DUP_RE = re.compile(r"\b(.+?)(\s+\1\b)+", re.IGNORECASE)
+FILLERS = {  # language-specific: a filler in one language is a real word in another ("er" = German "he")
+    "en": ("um", "uh", "er", "erm", "ah", "mm", "hmm"),
+    "tr": ("ee", "eee", "ıı", "ııı", "hmm", "mm"),
+}
+_FILLER_CACHE = {}
+DUP_MAX_WORDS = 6  # longest repeated phrase we collapse ("you know you know")
 ABBR_RE = re.compile(r"\b(Mr|Mrs|Dr|Jr|St)\.")
 NUMDOT_RE = re.compile(r"(\d)\.(\d)")
 SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-ZİŞĞÜÖÇ0-9\"“])")
 
 
-def _clean_text(text):
-    """Cheap transcript cleanup: fillers, repeated phrases, one sentence per line."""
+def _filler_re(lang):
+    """Compiled filler regex for a language code ('en', 'en-US', ...), or None if we have no list for it."""
+    base = (lang or "").split("-")[0].split("_")[0].lower()
+    if base not in FILLERS:
+        return None
+    if base not in _FILLER_CACHE:
+        _FILLER_CACHE[base] = re.compile(r"\b(" + "|".join(FILLERS[base]) + r")\b", re.IGNORECASE)
+    return _FILLER_CACHE[base]
+
+
+def _collapse_repeats(body):
+    """Collapse immediately repeated words/phrases ("world world", "you know you know") in O(n * DUP_MAX_WORDS)."""
+    toks = body.split()
+    i, out = 0, []
+    while i < len(toks):
+        for n in range(min(DUP_MAX_WORDS, (len(toks) - i) // 2), 0, -1):
+            gram = [t.lower() for t in toks[i:i + n]]
+            j = i + n
+            while j + n <= len(toks) and [t.lower() for t in toks[j:j + n]] == gram:
+                j += n
+            if j > i + n:  # at least one repeat
+                out.extend(toks[i:i + n])
+                i = j
+                break
+        else:
+            out.append(toks[i])
+            i += 1
+    return " ".join(out)
+
+
+def _clean_text(text, lang=None):
+    """Cheap transcript cleanup: fillers (only for languages we have a list for), repeated phrases,
+    one sentence per line."""
+    filler_re = _filler_re(lang)
     out = []
     for para in text.split("\n\n"):
         tag, body = "", para
         m = re.match(r"(\[\d+:?\d*:\d+\]\s*)", body)
         if m:
             tag, body = m.group(1), body[m.end():]
-        body = FILLER_RE.sub("", body)
-        prev = None
-        while prev != body:
-            prev, body = body, DUP_RE.sub(r"\1", body)
+        if filler_re:
+            body = re.sub(r",(\s*,)+", ",", filler_re.sub("", body))  # "this, uh, works" -> "this, works"
+        body = _collapse_repeats(body)
         body = ABBR_RE.sub(r"\1<<prd>>", body)
         body = NUMDOT_RE.sub(r"\1<<prd>>\2", body)
         sents = [s.replace("<<prd>>", ".").strip(" ,") for s in SENT_SPLIT_RE.split(body)]
@@ -1187,7 +1226,6 @@ AUDIO_MAX_BYTES = 18 * 1024 * 1024
 
 def _download_audio(vid, tmpdir):
     """Audio-only download, no ffmpeg: returns (path, ext) or (None, reason)."""
-    import tempfile
     out = os.path.join(tmpdir, vid + ".%(ext)s")
     opts = {"quiet": True, "no_warnings": True, "skip_download": False,
             "format": "bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
@@ -1206,25 +1244,48 @@ def _download_audio(vid, tmpdir):
 _GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
-def _gemini_call(prompt_text, model=_GEMINI_MODEL):
-    """Raw Gemini generateContent call over stdlib. Needs GEMINI_API_KEY."""
-    key = os.environ.get("GEMINI_API_KEY", "")
-    if not key:
-        raise SystemExit("this needs GEMINI_API_KEY (free at aistudio.google.com)")
-    body = json.dumps({
-        "contents": [{"parts": [{"text": prompt_text}]}],
-        "generationConfig": {"temperature": 0.0}}).encode()
+def _gemini_request(key, payload, model=_GEMINI_MODEL, retries=2):
+    """POST to Gemini generateContent over stdlib and return the reply text.
+
+    The API key goes in a header, never the URL (URLs end up in logs, tracebacks and proxies).
+    429 / 5xx are retried with backoff, honouring Retry-After.
+    """
+    import urllib.error
     req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}",
-        data=body, headers={"Content-Type": "application/json"})
-    try:
-        resp = json.load(urllib.request.urlopen(req, timeout=120))
-    except Exception as e:
-        raise RuntimeError(f"Gemini API error: {e}")
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", "x-goog-api-key": key})
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                resp = json.load(r)
+            break
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and attempt < retries:
+                try:
+                    wait = int(e.headers.get("Retry-After", ""))
+                except ValueError:
+                    wait = 4 * 2 ** attempt
+                time.sleep(min(wait, 60))
+                continue
+            detail = e.read()[:200].decode("utf-8", "replace")
+            raise RuntimeError(f"Gemini API error: HTTP {e.code} {detail}") from None
+        except Exception as e:
+            raise RuntimeError(f"Gemini API error: {type(e).__name__}: {e}") from None
     try:
         return resp["candidates"][0]["content"]["parts"][0]["text"].strip()
     except (KeyError, IndexError, TypeError):
-        raise RuntimeError(f"Gemini API unexpected response: {str(resp)[:200]}")
+        raise RuntimeError(f"Gemini API unexpected response: {str(resp)[:200]}") from None
+
+
+def _gemini_call(prompt_text, model=_GEMINI_MODEL):
+    """Text-only Gemini call. Needs GEMINI_API_KEY."""
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        raise SystemExit("this needs GEMINI_API_KEY (free at aistudio.google.com)")
+    return _gemini_request(key, {
+        "contents": [{"parts": [{"text": prompt_text}]}],
+        "generationConfig": {"temperature": 0.0}}, model)
 
 
 def _gemini_transcribe(audio_bytes, mime, lang="en", model=_GEMINI_MODEL):
@@ -1233,22 +1294,11 @@ def _gemini_transcribe(audio_bytes, mime, lang="en", model=_GEMINI_MODEL):
     key = os.environ.get("GEMINI_API_KEY", "")
     if not key:
         raise SystemExit("transcribe needs GEMINI_API_KEY (free at aistudio.google.com)")
-    body = json.dumps({
+    return _gemini_request(key, {
         "contents": [{"parts": [
             {"text": f"Transcribe this audio verbatim in {lang}. Output only the transcript text, no commentary."},
             {"inline_data": {"mime_type": mime, "data": base64.b64encode(audio_bytes).decode()}}]}],
-        "generationConfig": {"temperature": 0.0}}).encode()
-    req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}",
-        data=body, headers={"Content-Type": "application/json"})
-    try:
-        resp = json.load(urllib.request.urlopen(req, timeout=120))
-    except Exception as e:
-        raise RuntimeError(f"Gemini API error: {e}")
-    try:
-        return resp["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except (KeyError, IndexError, TypeError):
-        raise RuntimeError(f"Gemini API unexpected response: {str(resp)[:200]}")
+        "generationConfig": {"temperature": 0.0}}, model)
 
 
 def _summary_prompt(text, lang):
@@ -1290,7 +1340,6 @@ def _gemini_summarize(text, lang="en", model=_GEMINI_MODEL):
 
 def _try_transcribe(vid, lang, tmpdir, model=_GEMINI_MODEL):
     """Captionless fallback: audio download + Gemini. Returns (text, note) or (None, reason)."""
-    import tempfile
     path, ext = _download_audio(vid, tmpdir)
     if path is None:
         return None, ext
@@ -1377,7 +1426,6 @@ def _check_model_size(p, name):
 def _local_transcribe(vid, lang, tmpdir, model="tiny", auto_yes=False):
     """Captionless fallback via external whisper.cpp. Returns (text, note) or (None, reason)."""
     import subprocess
-    import tempfile
     binary, hint = find_whisper()
     if not binary:
         return None, f"whisper.cpp not found ({hint})"
@@ -1445,7 +1493,7 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                     if ttext is not None:
                         ttext = ttext.strip()
                         if clean:
-                            ttext = _clean_text(ttext)
+                            ttext = _clean_text(ttext, langs[0] if langs else "en")
                         res.update(lg=langs[0] if langs else "en", auto=False, text=ttext,
                                    trans=True, stage="ok")
                         res["meta"]["method"] = "gemini-transcribe"
@@ -1477,7 +1525,7 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                                           0 if bucket is not None else fetch_gap)
                     res["text"] = _join_paras(vtt_segments(vtt), ts, res["chapters"] or None).strip()
                     if clean:
-                        res["text"] = _clean_text(res["text"])
+                        res["text"] = _clean_text(res["text"], lg)
                     if summarize and len(res["text"].split()) > 100:
                         try:
                             res["summary"] = _gemini_summarize(res["text"], lg, gemini_model)
