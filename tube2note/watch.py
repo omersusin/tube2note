@@ -7,6 +7,7 @@ import time
 from .config import resolve_config
 from .job import _exit_code, run_job
 from .source import expand
+from .subs import load_subs
 
 
 def _state_path(urls, out):
@@ -69,7 +70,9 @@ def cmd_watch(argv):
     import argparse
     ap = argparse.ArgumentParser(prog="tube2note watch",
                                  description="Watch channels/playlists, collect new videos as they appear")
-    ap.add_argument("urls", nargs="+", help="channel / playlist URLs to watch")
+    ap.add_argument("urls", nargs="*", help="channel / playlist URLs to watch")
+    ap.add_argument("--subs", default=None,
+                    help="subscriptions.yaml file (url/out/lang per entry, no pyyaml needed)")
     ap.add_argument("-o", "--out", default="watch.md")
     ap.add_argument("--interval", type=float, default=0,
                     help="re-check every N minutes (0 = check once and exit, good for cron)")
@@ -88,16 +91,36 @@ def cmd_watch(argv):
     ap.add_argument("--pdf", action="store_true")
     ap.add_argument("--verbose", action="store_true")
     a = ap.parse_args(argv)
-    cfg = resolve_config({"outdir": a.dir, "layout": a.layout, "lang": a.lang,
-                          "clean": a.clean}, None)
-    code = _check(a.urls, a.out, cfg, a)
+    targets = [({"url": u}, a.out, a.lang) for u in a.urls]
+    if a.subs:
+        subs = load_subs(a.subs)
+        if not subs:
+            print(f"watch: no subscriptions in {a.subs}")
+            return 1
+        targets = [(s, s.get("out") or a.out, s.get("lang") or a.lang) for s in subs]
+    if not targets:
+        ap.error("give URLs or --subs subscriptions.yaml")
+
+    def _round():
+        code = 0
+        for sub, out, lang in targets:
+            if not out:
+                print(f"watch: entry {sub.get('url')} has no out, skipped.")
+                code = code or 1
+                continue
+            cfg = resolve_config({"outdir": a.dir, "layout": a.layout, "lang": lang,
+                                  "clean": a.clean}, None)
+            code = _check([sub["url"]], out, cfg, a) or code
+        return code
+
+    code = _round()
     if a.interval and a.interval > 0:
         secs = a.interval * 60
         print(f"watch: next check in {a.interval:g} min (Ctrl+C to stop).")
         try:
             while True:
                 time.sleep(secs)
-                code = _check(a.urls, a.out, cfg, a)
+                code = _round()
                 print(f"watch: next check in {a.interval:g} min (Ctrl+C to stop).")
         except KeyboardInterrupt:
             print("\nwatch: stopped.")

@@ -146,3 +146,20 @@ def test_ip_blocked_variants():
     assert _is_throttle(Exception("IP blocked"))
     assert _is_throttle(Exception("your IP address has been blocked"))
     assert not _is_throttle(Exception("video abc429XYZ12 unavailable"))
+
+
+def test_watch_subs_file(home, monkeypatch):
+    import tube2note.watch as w
+    (home / "subs.yaml").write_text("- url: http://a\n  out: a.md\n  lang: en\n"
+                                     "- url: http://b\n  out: b.md\n", encoding="utf-8")
+    monkeypatch.setattr(w, "expand", lambda urls, max_n, **k: ([{"id": "v1", "title": "T",
+                                                                "url": urls[0]}], None))
+    seen = []
+    monkeypatch.setattr(w, "run_job",
+                        lambda urls, *a, **k: seen.append((urls, k.get("outdir"))) or
+                        {"ok": 1, "skipped": 0, "total": 1})
+    import sys
+    monkeypatch.setattr(sys, "argv", ["tube2note"])
+    code = w.cmd_watch(["--subs", str(home / "subs.yaml"), "-d", str(home), "--sleep", "0"])
+    assert code == 0
+    assert [u for u, _ in seen] == [["http://a"], ["http://b"]]  # each sub collected to its own out

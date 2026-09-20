@@ -155,6 +155,13 @@ def tui():
         ts = cfg["timestamps"] if ts == "" else ts in ("y", "yes")
         lk = input("Clickable timestamp links? [n] > ").strip().lower() in ("y", "yes")
         sr = input("Write .srt sidecars? [n] > ").strip().lower() in ("y", "yes")
+        tr = None
+        if input("Transcribe videos without captions (needs GEMINI_API_KEY)? [n] > ").strip().lower() in ("y", "yes"):
+            tr = "api"
+            if input("Use local whisper.cpp instead of Gemini API? [n] > ").strip().lower() in ("y", "yes"):
+                tr = "local"
+        sm = input("Summarize each video (needs GEMINI_API_KEY)? [n] > ").strip().lower() in ("y", "yes")
+        tl = input("Translate transcripts to (lang code, empty=off) [] > ").strip() or None
         cl = input(f"Cleaning? [{'y' if cfg['clean'] else 'n'}] > ").strip().lower()
         cl = cfg["clean"] if cl == "" else cl in ("y", "yes")
         pdf = input("PDF too? [n] > ").strip().lower() in ("y", "yes")
@@ -179,7 +186,9 @@ def tui():
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
                     layout=lay, template=tmp, pdf=pdf, since=since, profile=prof, workers=wk,
                     clean=cl, clean_level=cfg["clean_level"],
-                    link_timestamps=lk, srt=sr)
+                    link_timestamps=lk, srt=sr,
+                    transcribe=tr is not None, engine=tr or "api",
+                    summarize=sm, translate=tl)
         except KeyboardInterrupt:
             print("\nCancelled.")
         again = input("\nNew job? [Enter]=yes, q=quit > ").strip()

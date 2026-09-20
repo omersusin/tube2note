@@ -68,7 +68,7 @@ Just run `tube2note` (or `tube2note --tui`) with no URLs. It walks you through:
 3. **URLs prompt**: validates each URL (invalid ones are rejected with a reason), auto-detects source name, video count, subtitle languages.
 4. **Since prompt** (multi-video only): `Only videos since YYYY-MM-DD`.
 5. **Settings table** to confirm: output file, folder, layout, languages, max videos, chunking, timestamps, PDF.
-6. **Live dashboard**: progress bar + current video + ok/skip/word counts, redrawn in place. `--verbose` switches to scrolling log lines.
+6. **Live dashboard**: progress bar + current video + ok/skip/word counts, redrawn in place. `--verbose` switches to scrolling log lines. Optional prompts cover timestamps, clickable links, `.srt`, transcribe/summarize/translate (needs `GEMINI_API_KEY`).
 
 It remembers your last folder and suggests output names from the channel/playlist title.
 
@@ -132,9 +132,10 @@ tube2note watch URL... -o out.md [--interval MIN] [--max 30] [-d DIR] [--layout 
                        [--lang LANG] [--timestamps] [--link-timestamps] [--srt]
                        [--no-clean] [--sleep S] [--throttle-cooldown S]
                        [--proxy P] [--cookies F] [--pdf] [--verbose]
+tube2note watch --subs subscriptions.yaml [--interval 60]   # many channels, one file each
 ```
 
-- First run collects everything (up to `--max`); later runs collect **only new videos**.
+- First run collects everything (up to `--max`); later runs collect **only new videos**. `--subs subscriptions.yaml` watches many channels at once (`- url: ...` + `out:` per entry, no pyyaml needed).
 - Seen video IDs live in `~/.cache/tube2note/watch/`. `--interval 0` (default) = check once and exit — ideal for cron / Termux:JobScheduler. `--interval 60` = loop forever (Ctrl+C stops).
 - Fatal runs (throttled out, empty result) don't mark anything seen — retried next round.
 - `subscriptions.yaml` files load via `tube2note.subs` (Python API).
@@ -295,6 +296,7 @@ Tests run the whole pipeline (and the web UI) offline against a fake yt-dlp in `
 
 ## Changelog
 
+- **0.11.0** — remaining gaps: `watch --subs` subscriptions file, TUI transcribe/summarize/translate prompts, site form AI fields + local-app button, skip-guarded backend test suite (fastapi = server-only by design).
 - **0.10.0** — round-2 excavation: search JSON limit fix, site form link/srt + local-app button, BACKEND precision (OUT_DIR, MAX_JOBS, /healthz), 16 adversarial tests, CWD-proof PWA tests, skip-guarded backend suite.
 - **0.9.0** — hardening round: watch clean-run-only seen-state, IP-block detection, MCP crash guards, search UTF-8 + limit fix, subs BOM/indent, backend job cap + `?t=` download + `/healthz`, web Timer fix, job try/finally, incomplete-list TTL, VTT poison guard, translate drift warning, cleaner abbreviations + Unicode sentences, link/srt in web UI + TUI + watch, PWA icons + SW registration.
 - **0.8.0** — `--link-timestamps` + `--srt` wired into CLI/API/web/MCP (+resume); backend token fail-closed.

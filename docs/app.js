@@ -14,6 +14,8 @@ function payload() {
     lang: $("lang").value, layout: $("layout").value, max: +$("max").value || 100,
     since: $("since").value, timestamps: $("timestamps").checked, clean: $("clean").checked,
     link_timestamps: $("link_timestamps").checked, srt: $("srt").checked,
+    transcribe: $("transcribe").checked, summarize: $("summarize").checked,
+    translate: $("translate").value,
     split_words: +$("split").value || 0, workers: +$("workers").value || 1};
 }
 function render(s) {

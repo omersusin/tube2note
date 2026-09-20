@@ -1,6 +1,8 @@
 """Backend API tests. Skipped unless the backend extra is installed.
 
-Backend devs: pip install fastapi uvicorn httpx
+Backend devs (server Python 3.10-3.13): pip install fastapi uvicorn httpx
+(needs pydantic v2 = Rust build; NOT installable on Termux — by design,
+the backend runs on servers, the phone runs `tube2note serve`).
 """
 import importlib.util
 

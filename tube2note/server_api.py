@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import time
+from typing import Optional
 from urllib.parse import urlsplit
 
 try:
@@ -61,7 +62,7 @@ def _live(j):
     return j is not None and j[0].running
 
 @app.post("/api/start")
-async def start(req: Request, x_token: str | None = Header(None)):
+async def start(req: Request, x_token: Optional[str] = Header(None)):
     _auth(x_token)
     body = await req.body()
     if len(body) > 64 * 1024:
@@ -93,7 +94,7 @@ async def start(req: Request, x_token: str | None = Header(None)):
     return {"ok": True}
 
 @app.post("/api/stop")
-async def stop(req: Request, x_token: str | None = Header(None)):
+async def stop(req: Request, x_token: Optional[str] = Header(None)):
     _auth(x_token)
     j = JOBS.get(_ip(req))
     if j:
@@ -101,13 +102,13 @@ async def stop(req: Request, x_token: str | None = Header(None)):
     return {"ok": True}
 
 @app.get("/api/state")
-def state(req: Request, x_token: str | None = Header(None)):
+def state(req: Request, x_token: Optional[str] = Header(None)):
     _auth(x_token)
     j = JOBS.get(_ip(req))
     return {"job": j[0].snapshot() if j else None, "files": list_files(BASE)}
 
 @app.get("/api/download")
-def dl(path: str, t: str | None = None, x_token: str | None = Header(None)):
+def dl(path: str, t: Optional[str] = None, x_token: Optional[str] = Header(None)):
     _auth(t or x_token)  # browsers can't set headers on <a> navigation: ?t= fallback
     full = resolve_served(BASE, path)
     if not full:
