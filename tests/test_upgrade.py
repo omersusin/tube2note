@@ -1,7 +1,15 @@
 import io
+import json
+import time
 
 from tube2note.config import DEFAULTS, _merge
-from tube2note.source import fetch_vtt
+from tube2note.source import (
+    _LIST_INCOMPLETE_TTL,
+    _list_cache_path,
+    _list_load,
+    _list_save,
+    fetch_vtt,
+)
 from tube2note.throttle import _is_throttle
 
 
@@ -25,16 +33,11 @@ def test_unknown_profile_warns(capsys):
     assert "unknown profile" in capsys.readouterr().out
 
 def test_incomplete_list_refetch(home):
-    import time
-    from tube2note.source import _list_load, _list_save, _LIST_INCOMPLETE_TTL
     _list_save(["u-inc"], 10, None, [{"id": "Y"}], "H", False)
     got, _ = _list_load(["u-inc"], 10, None)
     assert got == [{"id": "Y"}]
-    import tube2note.source as s
     d = {"ts": time.time() - _LIST_INCOMPLETE_TTL - 1, "max_n": 10, "complete": False,
          "videos": [{"id": "Y"}], "hint": "H"}
-    import json, os
-    from tube2note.source import _list_cache_path
     p = _list_cache_path(["u-inc"], None)
     json.dump(d, open(p, "w", encoding="utf-8"))
     assert _list_load(["u-inc"], 10, None) is None
