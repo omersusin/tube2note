@@ -3,35 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tube2note — YouTube → Markdown for NotebookLM</title>
+<title>tube2note — YouTube to Markdown for NotebookLM</title>
+<meta name="description" content="Turn channels, playlists, videos into Markdown + PDF for NotebookLM. Resumable, polite, phone-friendly.">
+<link rel="manifest" href="manifest.webmanifest">
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2em auto; padding: 0 1em; line-height: 1.6; }
-  pre { background: #f4f4f4; padding: 1em; border-radius: 8px; overflow-x: auto; }
-  .cta a { display: inline-block; margin-right: 1em; padding: .6em 1.2em; background: #0969da; color: #fff;
-           border-radius: 8px; text-decoration: none; }
+body{font-family:system-ui,sans-serif;max-width:760px;margin:2em auto;padding:0 1em;line-height:1.6}
+pre{background:#f4f4f4;padding:1em;border-radius:8px;overflow-x:auto}
+.cta a{display:inline-block;margin:0 .6em .6em 0;padding:.6em 1.2em;background:#0969da;color:#fff;border-radius:8px;text-decoration:none}
+.card{border:1px solid #e3e6ec;border-radius:12px;padding:1em;margin:1em 0}
 </style>
 </head>
 <body>
-<h1>tube2note — YouTube → Markdown for NotebookLM</h1>
-<p>Turn a channel, playlist, or videos into <strong>Markdown + PDF</strong> files ready for NotebookLM.
-Single-file Python, resumable, polite to YouTube's rate limits.</p>
-<div class="cta">
-  <a href="https://github.com/omersusin/tube2note">GitHub</a>
-  <a href="https://pypi.org/project/tube2note/">PyPI</a>
-</div>
+<h1>tube2note — YouTube to Markdown for NotebookLM</h1>
+<p>Turn a channel, playlist, or videos into <strong>Markdown + PDF</strong> ready for NotebookLM / any RAG pipeline. Resumable, polite to rate limits, works in terminal, guided mode, or local web UI.</p>
+<div class="cta"><a href="https://github.com/omersusin/tube2note">GitHub</a><a href="https://pypi.org/project/tube2note/">PyPI</a></div>
 <h2>Install</h2>
-<pre>pip install tube2note yt-dlp
-tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"</pre>
-<h2>Why</h2>
-<ul>
-  <li>NotebookLM caps YouTube imports (~100 videos) — tube2note merges everything.</li>
-  <li>500k-word auto-split, timestamps, chapters, per-video files, resume.</li>
-  <li>Guided TUI, web UI, profiles, PDF export, Gemini summaries.</li>
-</ul>
-<h2>Links</h2>
-<ul>
-  <li><a href="https://github.com/omersusin/tube2note">Source + docs</a></li>
-  <li><a href="https://pypi.org/project/tube2note/">pip install tube2note</a></li>
-</ul>
+<pre>pip install tube2note
+tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"
+# guided: tube2note
+# web UI: tube2note serve
+# search: tube2note search "query" -d ./out</pre>
+<div class="card"><strong>Students:</strong> one file per course, <code>--split-words 400000</code> under the 500k NotebookLM cap, <code>--timestamps</code> for citations.</div>
+<div class="card"><strong>Researchers:</strong> <code>--layout tree</code> + INDEX.md, <code>--since YYYY-MM-DD</code>, resume with <code>--resume-last</code>, search offline.</div>
+<h2>Why not paste links into NotebookLM?</h2>
+<ul><li>Caps (~100 videos), needs captions per video.</li><li>tube2note merges everything you control: timestamps, chapters, per-video files, resume.</li></ul>
+<h2>Deploy this site free</h2>
+<p>Settings → Pages → Deploy from Actions. File lives in <code>docs/</code>, workflow <code>.github/workflows/pages.yml</code>.</p>
 </body>
 </html>

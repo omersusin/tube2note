@@ -152,17 +152,24 @@ class Job:
         threading.Thread(target=self._pump, daemon=True).start()
 
     def _pump(self):
-        for line in self.proc.stdout:
-            line = line.rstrip("\n")
-            m, c = PROGRESS_RE.search(line), CURRENT_RE.match(line)
-            with self.lock:
-                self.lines.append(line)
-                if m:
-                    self.progress = {"done": int(m.group(1)), "total": int(m.group(2)), "words": int(m.group(3))}
-                if c:
-                    self.current = c.group(3)[:120]
-        self.proc.wait()
-        self.ended = time.time()
+        try:
+            for line in self.proc.stdout:
+                line = line.rstrip("\n")
+                m, c = PROGRESS_RE.search(line), CURRENT_RE.match(line)
+                with self.lock:
+                    self.lines.append(line)
+                    if m:
+                        self.progress = {"done": int(m.group(1)), "total": int(m.group(2)), "words": int(m.group(3))}
+                    if c:
+                        self.current = c.group(3)[:120]
+            self.proc.wait()
+        finally:
+            try:
+                if self.proc.stdout:
+                    self.proc.stdout.close()
+            except Exception:
+                pass
+            self.ended = time.time()
 
     @property
     def running(self):

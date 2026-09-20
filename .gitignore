@@ -4,7 +4,9 @@
 .pytest_cache/
 .ruff_cache/
 .venv/
+.bak/
 __pycache__/
+apply.py
 build/
 dist/
 tube2note-out/

@@ -1,0 +1,4 @@
+{"name": "tube2note", "short_name": "tube2note",
+ "start_url": "/", "display": "standalone",
+ "background_color": "#0d1017", "theme_color": "#d92d20",
+ "icons": [{"src": "icon-512.png", "sizes": "512x512", "type": "image/png"}]}

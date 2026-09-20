@@ -145,16 +145,22 @@ def _make_req(url):
 
 
 def fetch_vtt(formats, opener=None):
-    want = [f for f in formats if f.get("ext") == "vtt"] or formats
-    # ponytail: ilk vtt'yi al, tum formatlari denemek gereksiz
-    url = want[0]["url"]
-    req = _make_req(url)
-    if opener is None:  # plain stdlib (tests, offline use)
-        ctx = urllib.request.urlopen(req, timeout=20)
-    else:  # yt-dlp handler: proxy, cookies, impersonation aware
-        ctx = opener(req)
-    with ctx as r:
-        return r.read().decode("utf-8", errors="ignore")
+    """Try each format in order (vtt first). One dead mirror must not kill the video."""
+    want = [f for f in formats if f.get("ext") == "vtt"] or list(formats)
+    last = None
+    for f in want:
+        try:
+            req = _make_req(f["url"])
+            if opener is None:  # plain stdlib (tests, offline use)
+                ctx = urllib.request.urlopen(req, timeout=20)
+            else:  # yt-dlp handler: proxy, cookies, impersonation aware
+                ctx = opener(req)
+            with ctx as r:
+                return r.read().decode("utf-8", errors="ignore")
+        except Exception as e:
+            last = e
+            continue
+    raise last if last is not None else RuntimeError("no subtitle formats")
 
 
 def detect_langs(videos, probe=3, want=("tr", "en")):
