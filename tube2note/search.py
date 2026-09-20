@@ -35,7 +35,7 @@ def search_collections(query, base=".", as_json=False, limit=50):
                     if len(hits) >= limit:
                         break
     if as_json:
-        print(json.dumps(hits, indent=2, ensure_ascii=False))
+        print(json.dumps(hits[:limit], indent=2, ensure_ascii=False))
     else:
         if not hits:
             print("No hits for: " + query); return 0

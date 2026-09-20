@@ -1,4 +1,7 @@
-[![version v0.9.0](https://img.shields.io/badge/version-v0.9.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.9.0)
+[![version v0.10.0](https://img.shields.io/badge/version-v0.10.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.10.0)
+
+## v0.9.0
+d737c61 0.9.0: agent-excavation hardening (watch/throttle/mcp/search/subs/server/job/cache/vtt/cleaner/completeness)
 
 ## v0.8.0
 99b8242 0.8.0: link-timestamps/srt wired everywhere, backend token fail-closed, full README

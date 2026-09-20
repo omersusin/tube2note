@@ -5,6 +5,8 @@ from tube2note.config import DEFAULTS, _merge
 from tube2note.throttle import _is_throttle
 from tube2note.web import build_argv
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def test_throttle_bot():
     assert _is_throttle(Exception("Sign in to confirm you're not a bot"))
@@ -29,9 +31,10 @@ def test_build_argv_ssrf(tmp_path):
         pass
 
 def test_pwa_files():
-    assert os.path.exists("docs/app.html") and os.path.exists("docs/app.js")
-    assert "fetch" in open("docs/sw.js").read()
-    assert json.load(open("docs/manifest.webmanifest"))["name"]
+    assert os.path.exists(os.path.join(ROOT, "docs", "app.html"))
+    assert os.path.exists(os.path.join(ROOT, "docs", "app.js"))
+    assert "fetch" in open(os.path.join(ROOT, "docs", "sw.js")).read()
+    assert json.load(open(os.path.join(ROOT, "docs", "manifest.webmanifest")))["name"]
 
 def test_server_api_import():
     import importlib.util

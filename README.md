@@ -129,7 +129,9 @@ Resume model: `.done` (finished IDs), `.skip` (JSON lines: id/title/url/reason; 
 
 ```bash
 tube2note watch URL... -o out.md [--interval MIN] [--max 30] [-d DIR] [--layout L]
-                       [--lang LANG] [--no-clean] [--proxy P] [--cookies F] [--pdf] [--verbose]
+                       [--lang LANG] [--timestamps] [--link-timestamps] [--srt]
+                       [--no-clean] [--sleep S] [--throttle-cooldown S]
+                       [--proxy P] [--cookies F] [--pdf] [--verbose]
 ```
 
 - First run collects everything (up to `--max`); later runs collect **only new videos**.
@@ -161,7 +163,7 @@ Public demo recipe (verified): `tube2note serve --public` (token auth stays on, 
 
 ## Site backend
 
-The [site form](https://omersusin.github.io/tube2note/app.html) needs a backend — GitHub Pages is static-only (no Python, no yt-dlp, no secrets, 10s job cap; keys in JS would leak instantly). Free path: deploy `render.yaml` to Render (750h/mo, sleeps; ephemeral FS, `OUT_DIR=/tmp`) or `fly.toml` to Fly.io (512MB for ffmpeg), set `BACKEND_URL` in `docs/app.js`, redeploy Pages. Full runbook: `docs/BACKEND.md`. Backend served by `tube2note serve-api` (FastAPI: `/api/start|state|download`, token, per-IP queue, 50-URL cap, SSRF allow-list for youtube.com/youtu.be only). Local alternative that works today: `tube2note serve` + the PWA shell in `docs/`.
+The [site form](https://omersusin.github.io/tube2note/app.html) needs a backend — GitHub Pages is static-only (no Python, no yt-dlp, no secrets, 10s job cap; keys in JS would leak instantly). Free path: deploy `render.yaml` to Render (750h/mo, sleeps; ephemeral FS, `OUT_DIR=/tmp`) or `fly.toml` to Fly.io (512MB for ffmpeg), set `BACKEND_URL` in `docs/app.js`, redeploy Pages. Full runbook: `docs/BACKEND.md`. Backend served by `tube2note serve-api` (FastAPI: `/api/start|stop|state|download` + unauthenticated `/healthz`, token, per-IP queue, max 4 concurrent jobs via `BACKEND_MAX_JOBS`, 50-URL cap, SSRF allow-list for youtube.com/youtu.be only). Local alternative that works today: `tube2note serve` + the PWA shell in `docs/`.
 
 ## MCP server
 
@@ -169,7 +171,7 @@ The [site form](https://omersusin.github.io/tube2note/app.html) needs a backend 
 tube2note mcp
 ```
 
-Stdio JSON-RPC for Claude/AI assistants. Tools: `download` (url, out, outdir, max, lang, layout, summarize, translate), `status` (dir), `dry_run` (url, max, lang). Progress output is redirected off the RPC stream. Client config:
+Stdio JSON-RPC for Claude/AI assistants. Tools: `download` (url, out, outdir, max, lang, layout, summarize, translate, link_timestamps, srt), `status` (dir), `dry_run` (url, max, lang). Progress output is redirected off the RPC stream. Client config:
 
 ```json
 {"mcpServers": {"tube2note": {"command": "tube2note", "args": ["mcp"]}}}
@@ -293,6 +295,7 @@ Tests run the whole pipeline (and the web UI) offline against a fake yt-dlp in `
 
 ## Changelog
 
+- **0.10.0** — round-2 excavation: search JSON limit fix, site form link/srt + local-app button, BACKEND precision (OUT_DIR, MAX_JOBS, /healthz), 16 adversarial tests, CWD-proof PWA tests, skip-guarded backend suite.
 - **0.9.0** — hardening round: watch clean-run-only seen-state, IP-block detection, MCP crash guards, search UTF-8 + limit fix, subs BOM/indent, backend job cap + `?t=` download + `/healthz`, web Timer fix, job try/finally, incomplete-list TTL, VTT poison guard, translate drift warning, cleaner abbreviations + Unicode sentences, link/srt in web UI + TUI + watch, PWA icons + SW registration.
 - **0.8.0** — `--link-timestamps` + `--srt` wired into CLI/API/web/MCP (+resume); backend token fail-closed.
 - **0.7.0** — site backend (`serve-api`, Render/Fly files), site app form + PWA, clickable-timestamp + SRT libraries, `subscriptions.yaml`, Tauri scaffold.

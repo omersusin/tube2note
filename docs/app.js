@@ -13,6 +13,7 @@ function payload() {
   return {urls: $("urls").value.split(/\s+/).filter(Boolean), name: $("name").value,
     lang: $("lang").value, layout: $("layout").value, max: +$("max").value || 100,
     since: $("since").value, timestamps: $("timestamps").checked, clean: $("clean").checked,
+    link_timestamps: $("link_timestamps").checked, srt: $("srt").checked,
     split_words: +$("split").value || 0, workers: +$("workers").value || 1};
 }
 function render(s) {
@@ -34,4 +35,5 @@ $("go").onclick = async () => {
   $("err").textContent = ""; $("dl").hidden = true;
   try { render(await api("/api/start", payload())); } catch (e) { $("err").textContent = e.message; }
 };
+$("local").onclick = () => { location.href = "http://127.0.0.1:8765"; };
 poll();

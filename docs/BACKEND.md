@@ -8,8 +8,11 @@ execution runs below. Never put keys in JS.
 
 Render: Blueprint `render.yaml` → set BACKEND_TOKEN. Free = ephemeral FS
 (no disk), sleeps 15min idle, 750h/mo. Transcripts vanish on sleep — download
-promptly. Fly: `fly deploy` (512MB shared, force_https). Oracle VPS if you
-outgrow both. HF Spaces Docker needs PRO — legacy file kept, don't use free.
+promptly. OUT_DIR is `/tmp/tube2note-out`. Healthcheck is unauthenticated
+`/healthz` (`/api/*` needs the token). Max 4 concurrent jobs
+(`BACKEND_MAX_JOBS`); extra starts get 503. Fly: `fly deploy` (512MB shared,
+force_https). Oracle VPS if you outgrow both. HF Spaces Docker needs PRO —
+legacy file kept, don't use free.
 
 Then: set BACKEND_URL in docs/app.js, push → Pages redeploys.
 

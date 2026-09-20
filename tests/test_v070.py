@@ -21,9 +21,11 @@ def test_subs(tmp_path):
 
 def test_pwa_files():
     import os
-    assert os.path.exists("docs/app.js") and os.path.exists("docs/sw.js")
-    assert "X-Token" in open("docs/app.js").read()
-    assert "/api/" in open("docs/sw.js").read()
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    assert os.path.exists(os.path.join(root, "docs", "app.js"))
+    assert os.path.exists(os.path.join(root, "docs", "sw.js"))
+    assert "X-Token" in open(os.path.join(root, "docs", "app.js")).read()
+    assert "/api/" in open(os.path.join(root, "docs", "sw.js")).read()
 
 def test_server_api_shape():
     import importlib.util
