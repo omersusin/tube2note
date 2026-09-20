@@ -104,6 +104,10 @@ def build_argv(p, base_dir, python=None):
         argv += ["--since", since]
     if _bool(p.get("timestamps")):
         argv.append("--timestamps")
+    if _bool(p.get("link_timestamps")):
+        argv.append("--link-timestamps")
+    if _bool(p.get("srt")):
+        argv.append("--srt")
     if p.get("clean") is not None and not _bool(p.get("clean")):
         argv.append("--no-clean")
     split = _int(p.get("split_words"), 0, 500000, 0, "Split words")

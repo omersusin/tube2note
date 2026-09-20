@@ -14,6 +14,8 @@ from yt_dlp import YoutubeDL
 from .clean import _clean_text
 from .commands import ensure_extra
 from .config import _save_last
+from .export_srt import segs_to_srt
+from .links import linkify
 from .llm import _GEMINI_MODEL, _gemini_summarize, _translate_chunks, _try_transcribe
 from .naming import DEFAULT_TEMPLATES, render_template
 from .output import (
@@ -32,6 +34,13 @@ from .throttle import Bucket, _countdown, _is_throttle
 from .ui import dash_end, dash_update, dim, green, log, panel, red, set_verbose
 from .vtt import _join_paras, vtt_segments
 from .whisper import _local_transcribe
+
+
+def _srt_text(segs):
+    """[(start, text)] -> SRT (end = next start, last = +5s; overlap clamped inside)."""
+    triples = [(st, (segs[k + 1][0] if k + 1 < len(segs) else st + 5.0), tx)
+               for k, (st, tx) in enumerate(segs)]
+    return segs_to_srt(triples)
 
 
 def _exit_code(result):
@@ -101,7 +110,9 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                 try:
                     vtt, cached = _get_vtt(v["id"], lg, auto, fmts, ydl.urlopen,
                                           0 if bucket is not None else fetch_gap)
-                    res["text"] = _join_paras(vtt_segments(vtt), ts, res["chapters"] or None).strip()
+                    segs = vtt_segments(vtt)
+                    res["segs"] = segs
+                    res["text"] = _join_paras(segs, ts, res["chapters"] or None).strip()
                     if clean:
                         res["text"] = _clean_text(res["text"], lg, clean_level)
                     if summarize and len(res["text"].split()) > 100:
@@ -176,7 +187,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             verbose=False, layout="single", template="", pdf=False,
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
             workers=1, clean=True, clean_level="full", transcribe=False, summarize=False,
-            gemini_model=_GEMINI_MODEL, engine="api", translate=None, auto_yes=False):
+            gemini_model=_GEMINI_MODEL, engine="api", translate=None, auto_yes=False,
+            link_timestamps=False, srt=False):
     if videos is None:
         videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
@@ -191,6 +203,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         lang_str = coll["lang"]
     if isinstance(coll.get("timestamps"), bool):
         ts = coll["timestamps"]
+    ts = ts or link_timestamps  # links need markers; never silently produce unlinkable text
     if coll.get("chunk") is not None:
         try:
             chunk = max(0, int(coll["chunk"]))
@@ -221,7 +234,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                since=since, proxy=proxy, cookiefile=cookiefile, profile=profile,
                translate=translate, clean=clean, clean_level=clean_level,
                transcribe=transcribe, summarize=summarize, gemini_model=gemini_model,
-               engine=engine, fetch_gap=fetch_gap, workers=workers, pdf=pdf)
+                engine=engine, fetch_gap=fetch_gap, workers=workers, pdf=pdf,
+                link_timestamps=link_timestamps, srt=srt)
     print(f"{total} videos found", flush=True)
     if not videos:
         return {"ok": 0, "skipped": 0, "total": 0}
@@ -311,6 +325,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 consec, status = 0, "no subtitles"
                 continue
             text = res["text"]
+            if link_timestamps:
+                text = linkify(text, v["id"])
             if res.get("cached") and verbose:
                 log("  (from cache)")
             if text is None:
@@ -378,6 +394,15 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                         if res.get("translation"):
                             vf.write(f"\n### Translation ({translate})\n{res['translation']}\n")
                         vf.write(f"\n{text}\n")
+                if srt and res.get("segs"):
+                    srt_text = _srt_text(res["segs"])
+                    if layout != "single":
+                        srt_path = os.path.splitext(vp)[0] + ".srt"
+                    else:
+                        base = os.path.splitext(os.path.basename(out))[0]
+                        srt_path = os.path.join(root, f"{base}_{v['id']}.srt")
+                    with open(srt_path, "w", encoding="utf-8") as sf:
+                        sf.write(srt_text)
             except OSError as e:
                 print(red(f"  ! FATAL disk/IO error, stopping: {e}"))
                 raise SystemExit(1)

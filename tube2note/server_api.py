@@ -5,6 +5,7 @@ Render free = ephemeral FS (no disk). Fly needs 512MB (see fly.toml).
 """
 import json
 import os
+import secrets
 import time
 from urllib.parse import urlsplit
 
@@ -17,6 +18,9 @@ except ImportError:
 from .web import Job, build_argv, list_files, resolve_served
 
 TOK = os.environ.get("BACKEND_TOKEN", "")
+if not TOK:  # fail closed: random per-boot token, like `serve` (never run open)
+    TOK = secrets.token_urlsafe(24)
+    print(f"BACKEND_TOKEN unset: generated {TOK}", flush=True)
 BASE = os.path.abspath(os.environ.get("OUT_DIR", "tube2note-out"))
 HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 JOBS = {}  # ip -> (Job, timestamp)
@@ -32,7 +36,7 @@ async def _err_json(request, exc):
                         content={"error": str(exc.detail), "detail": str(exc.detail)})
 
 def _auth(tok):
-    if TOK and tok != TOK:
+    if tok != TOK:
         raise HTTPException(401, "bad token")
 
 def _ok(u):

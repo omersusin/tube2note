@@ -8,6 +8,7 @@ from .clean import _clean_text
 from .commands import EXTRAS
 from .config import DEFAULTS, _merge
 from .job import _exit_code
+from .links import _label_to_secs, linkify
 from .llm import _gemini_summarize, _gemini_transcribe, _split_words, _summary_prompt
 from .mcp import _handle as _mcp_handle
 from .naming import render_template, sanitize_filename, slug
@@ -156,6 +157,8 @@ def _self_test():
     _list_save(["u9"], 100, None, [], "H", True)
     assert _list_load(["u9"], 100, None) is None  # empty listings are never cached
     assert [v["id"] for v in _new_videos([{"id": "a"}, {"id": "b"}], {"a"})] == ["b"]
+    assert _label_to_secs("00:01") == 1 and _label_to_secs("1:02:03") == 3723
+    assert linkify("[00:01] hi", "VID1") == "[00:01](https://youtu.be/VID1?t=1s) hi"
     assert {t["name"] for t in _mcp_handle({"id": 1, "method": "tools/list", "params": {}})[0]["result"]["tools"]} == \
         {"download", "status", "dry_run"}
     assert set(EXTRAS) >= {"pdf", "whisper", "faster-whisper"}

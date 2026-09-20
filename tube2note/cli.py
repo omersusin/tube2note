@@ -91,6 +91,8 @@ def main():
     ap.add_argument("-d", "--dir", default=None, help="output folder (created if missing)")
     ap.add_argument("--layout", default=None, help="output layout: single, videos or tree")
     ap.add_argument("--timestamps", action="store_true", default=None, help="keep [MM:SS] markers in transcripts")
+    ap.add_argument("--link-timestamps", action="store_true", help="clickable [MM:SS](youtu.be?t=Ns) links (implies timestamps)")
+    ap.add_argument("--srt", action="store_true", help="write a .srt sidecar per video")
     ap.add_argument("--clean", dest="clean", action="store_true", default=None, help="clean transcripts (default on)")
     ap.add_argument("--no-clean", dest="clean", action="store_false", help="keep raw transcripts")
     ap.add_argument("--clean-level", default=None, help="cleaning strength: light or full (default full)")
@@ -166,6 +168,8 @@ def main():
                 since=(a.since or last.get("since")),
                 translate=(a.translate or last.get("translate")),
                 clean=last.get("clean", True), clean_level=(a.clean_level or last.get("clean_level", "full")),
+                link_timestamps=(a.link_timestamps or last.get("link_timestamps", False)),
+                srt=(a.srt or last.get("srt", False)),
                 transcribe=(a.transcribe or last.get("transcribe", False)),
                 summarize=(a.summarize or last.get("summarize", False)),
                 gemini_model=(a.gemini_model or last.get("gemini_model")),
@@ -181,4 +185,5 @@ def main():
             clean_level=a.clean_level or cfg["clean_level"],
             transcribe=a.transcribe, summarize=a.summarize,
             gemini_model=a.gemini_model or _GEMINI_MODEL, engine=a.engine,
-            translate=a.translate, auto_yes=a.yes))
+            translate=a.translate, auto_yes=a.yes,
+            link_timestamps=a.link_timestamps, srt=a.srt))

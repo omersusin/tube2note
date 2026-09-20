@@ -22,7 +22,9 @@ TOOLS = [
                          "lang": {"type": "string", "description": "subtitle languages, e.g. 'tr,en'"},
                          "layout": {"type": "string", "enum": ["single", "videos", "tree"]},
                          "summarize": {"type": "boolean", "description": "needs GEMINI_API_KEY"},
-                         "translate": {"type": "string", "description": "target lang, needs GEMINI_API_KEY"}},
+                         "translate": {"type": "string", "description": "target lang, needs GEMINI_API_KEY"},
+                         "link_timestamps": {"type": "boolean", "description": "clickable timestamp links"},
+                         "srt": {"type": "boolean", "description": "write .srt sidecar per video"}},
                      "required": ["url"]}},
     {"name": "status",
      "description": "Collection progress (done/skipped counts) for a folder.",
@@ -56,7 +58,9 @@ def _call(name, args):
                           int(args.get("max", 100)), 2.0, videos=None,
                           outdir=cfg["outdir"], layout=cfg["layout"],
                           summarize=bool(args.get("summarize")),
-                          translate=args.get("translate"))
+                          translate=args.get("translate"),
+                          link_timestamps=bool(args.get("link_timestamps")),
+                          srt=bool(args.get("srt")))
         tail = "\n".join(buf.getvalue().splitlines()[-5:])
         return _text(f"exit={_exit_code(res)}\n{tail}")
     if name == "status":

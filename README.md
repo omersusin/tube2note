@@ -3,54 +3,50 @@
 [![PyPI](https://img.shields.io/pypi/v/tube2note)](https://pypi.org/project/tube2note/)
 [![CI](https://github.com/omersusin/tube2note/actions/workflows/ci.yml/badge.svg)](https://github.com/omersusin/tube2note/actions)
 [![Site](https://img.shields.io/badge/site-tube2note.github.io-blue)](https://omersusin.github.io/tube2note/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-Turn a YouTube channel, playlist, or list of videos into **Markdown files** (or PDF) ready to feed NotebookLM / any RAG pipeline. Small and dependency-light (just `yt-dlp`), resumable, polite to YouTube's rate limits. Works from the command line, a guided terminal mode, or a local web page.
+Turn a YouTube channel, playlist, or list of videos into **Markdown files** (or PDF) ready to feed NotebookLM / any RAG pipeline. Dependency-light (just `yt-dlp`), resumable, polite to YouTube's rate limits. Terminal, guided mode, local web page, MCP server, or Python API.
 
-🌐 **Site:** https://omersusin.github.io/tube2note/ (docs + try-it form; needs a backend — see [Site backend](#site-backend))
+🌐 **Site:** https://omersusin.github.io/tube2note/ · 📦 **PyPI:** `pip install tube2note` · 🐙 **Repo:** https://github.com/omersusin/tube2note
+
+## Contents
+
+- [Install](#install) · [Quickstart](#quickstart) · [Guided mode (TUI)](#guided-mode-tui)
+- [CLI reference](#cli-reference) · [Watch mode](#watch-mode) · [Search](#search)
+- [Web UI](#web-ui) · [Site backend](#site-backend) · [MCP server](#mcp-server) · [Python API](#python-api)
+- [Gemini features](#gemini-features) · [Transcript cleaning](#transcript-cleaning) · [PDF](#pdf)
+- [Extras](#extras) · [Configuration](#configuration) · [Exit codes](#exit-codes)
+- [NotebookLM limits](#notebooklm-limits-verified-2026) · [Troubleshooting](#troubleshooting)
+- [Project layout](#project-layout) · [Development](#development) · [Changelog](#changelog) · [FAQ](#faq)
+
+## Install
+
+```bash
+pip install tube2note            # needs Python 3.10+, pulls yt-dlp automatically
+pip install "tube2note[pdf]"     # + PDF export (fpdf2)
+pipx install tube2note           # isolated CLI, recommended on PC/Mac
+```
+
+Termux (Android):
 
 ```bash
 pip install tube2note
-tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"
-# or guided mode (just type `tube2note`, answer a few questions):
-tube2note
+tube2note doctor                 # checks yt-dlp, fonts, config, disk
 ```
 
-Prefer a page over a terminal? `tube2note serve` (see [Web UI](#web-ui)).
+From source:
 
-PDF too? `pip install "tube2note[pdf]"`, then add `--pdf` (or run `tube2note pdf existing.md`).
+```bash
+git clone https://github.com/omersusin/tube2note && cd tube2note
+pip install -e ".[dev]"          # + pytest + ruff for development
+python3 -m tube2note
+```
 
-## Why not just paste YouTube links into NotebookLM?
-
-- NotebookLM caps YouTube imports (~100 videos) and needs caption files per video.
-- tube2note merges everything into sources you control: one file per 500k-word cap, timestamps, per-video files, resume after interruptions.
-
-## Features
-
-- **Channel / playlist / video URLs** (auto-detected listing, Shorts/tabs handled)
-- **Guided TUI**: intro, first-run guide, auto-detected file name / video count / languages, confirm table, live dashboard (bar + current video + stats)
-- **Anti-throttle engine**: chunks with breaks, jittered pacing, single retry on 429, long cooldown after 5 throttles in a row, optional `--workers 2-4` behind one shared bucket (default: serial, safest). Detects real ban texts (bot-check, 403, IP block), not just 429
-- **Resume & redo**: `.done` log — Ctrl+C anytime, continue later; `--fresh` discards progress and starts over; skip log reconciled every run (youtu.be/shorts/embed/live URLs understood); `--redo VIDEO_ID` reprocesses one video cleanly; `--resume-last` keeps AI/worker flags
-- **Watch mode**: `tube2note watch URL -o out.md [--interval 60]` — collects only new videos (`subscriptions.yaml` supported via API)
-- **Layouts**: `single` (one .md), `videos` (per-video files + `INDEX.md`), `tree` (`Channel/Video/transcript.md` + `INDEX.md` + YAML frontmatter)
-- **Name templates**: `--name-template "{channel}/{title} [{id}]"` (fields: channel, title, id, index, date, lang)
-- **Search**: `tube2note search "query" -d ./out [--json]` — full-text over collections, stdlib only
-- **Personalization**: `setup` wizard, named `--profile`s (typos warn instead of silently falling back), `YT2MD_*` env vars, per-folder `.yt2md.json` overrides
-- **NotebookLM-aware**: `--timestamps`, `--split-words` auto-split under the 500k-word cap, chapter-based sections, rich per-video metadata
-- **Transcript cleaning** (default on, `--no-clean` to disable, `--clean-level light|full`): filler words, repeated phrases, one sentence per line
-- **Gemini extras** (needs free `GEMINI_API_KEY`; transcripts sent to Google — printed every run): `--transcribe` for captionless videos (`--engine local` uses your whisper.cpp instead), `--summarize` per-video summaries, `--translate LANG`, `--gemini-model` to switch models (default gemini-2.5-flash-lite)
-- **Web UI**: `tube2note serve` opens a phone-friendly page to start, watch and stop jobs and download the results (stdlib only, works in Termux)
-- **MCP server**: `tube2note mcp` — Claude/AI assistants can `download`, `status`, `dry_run` over stdio. Client config:
-  `{"mcpServers": {"tube2note": {"command": "tube2note", "args": ["mcp"]}}}`
-- **Python API**: `import tube2note.api` → `collect()`, `list_videos()`, `language_hint()` (+ `links`, `export_srt`, `subs` helpers)
-- **PDF export**: `--pdf` or `pdf file.md [...]` (needs `pip install "tube2note[pdf]"`)
-- **Extras**: `tube2note extras [install|remove] <name>` — `pdf`, `whisper`, `faster-whisper` (PC only). Consent before every download (`--yes` skips prompts in scripts)
-- **Status & dry-run**: `status [dir]` progress table (`--json` for scripts), `--dry-run` estimate before downloading
-- **Smart & polite**: shared subtitle cache (`~/.cache/tube2note`), all subtitle mirrors tried before skipping, `--since` date filter, `--proxy`/`--cookies`, `doctor` diagnosis (`--proxy` to test one), Termux:Widget one-tap resume, Termux share-sheet hook (`tube2note share`)
+`pip install tube2note` also installs the short `yt` alias. If you have the `yt-project` package, the last-installed one wins — uninstall the other or always call `tube2note`.
 
 ## Quickstart
 
 ```bash
-pip install tube2note
 tube2note -o notes.md "<playlist_url>" "<video_url>" ...
 tube2note -o channel.md --max 200 --layout tree -d ./out "https://www.youtube.com/@SomeChannel/videos"
 tube2note status ./out
@@ -58,34 +54,216 @@ tube2note watch "https://www.youtube.com/@SomeChannel/videos" -o channel.md --in
 tube2note search "transformer" -d ./out
 ```
 
-From source:
+## Why not just paste YouTube links into NotebookLM?
+
+- NotebookLM caps YouTube imports (~100 videos) and needs caption files per video.
+- tube2note merges everything into sources you control: one file per 500k-word cap, timestamps, chapters, per-video files, resume after interruptions.
+
+## Guided mode (TUI)
+
+Just run `tube2note` (or `tube2note --tui`) with no URLs. It walks you through:
+
+1. **Intro + first-run guide** (HOW TO USE panel with tips, e.g. type `400000` at the split prompt for big files).
+2. **Personalize defaults** (optional): folder, layout, languages, timestamps, chunk size/break, name template — saved, or saved as a named `--profile`.
+3. **URLs prompt**: validates each URL (invalid ones are rejected with a reason), auto-detects source name, video count, subtitle languages.
+4. **Since prompt** (multi-video only): `Only videos since YYYY-MM-DD`.
+5. **Settings table** to confirm: output file, folder, layout, languages, max videos, chunking, timestamps, PDF.
+6. **Live dashboard**: progress bar + current video + ok/skip/word counts, redrawn in place. `--verbose` switches to scrolling log lines.
+
+It remembers your last folder and suggests output names from the channel/playlist title.
+
+## CLI reference
+
+```
+tube2note [URL ...] [options] | status | setup | doctor | widget | share
+          | extras | pdf | watch | search | mcp | serve | serve-api
+```
+
+| Flag | Default | What |
+|---|---|---|
+| `-o, --out` | `tube2note.md` | Output markdown filename |
+| `-d, --dir` | config/`.` | Output folder (created if missing) |
+| `--layout` | `single` | `single`, `videos`, or `tree` |
+| `--lang` | auto | Subtitle priority, e.g. `tr,en` (auto-detected otherwise) |
+| `--max` | 100 | Max videos per run (caps listing time too) |
+| `--since` | — | Only videos on/after `YYYY-MM-DD` |
+| `--timestamps` | off | Keep `[MM:SS]` markers in transcripts |
+| `--link-timestamps` | off | Clickable `[MM:SS](youtu.be?t=Ns)` links (implies timestamps) |
+| `--srt` | off | Write a `.srt` sidecar per video |
+| `--clean / --no-clean` | on | Clean transcripts / keep raw |
+| `--clean-level` | `full` | `light` (dedup only) or `full` (fillers + repeats + sentences) |
+| `--name-template` | — | Per-video path, e.g. `"{channel}/{title} [{id}]"` (fields: channel, title, id, index, date, lang) |
+| `--split-words` | 0 | Auto-split finished file into N-word parts (0 = off) |
+| `--pdf` | off | Also write PDF next to the Markdown |
+| `--sleep` | 2.0 | Pause between videos (s) |
+| `--chunk` | 50 | Long break every N videos |
+| `--chunk-cooldown` | 10 min | Break between chunks, in seconds |
+| `--fetch-gap` | 10 | Max pause before subtitle fetch (s); `0` = fast mode |
+| `--workers` | 1 | Parallel fetch workers 1–4 behind one shared bucket (1 = serial, safest) |
+| `--throttle-cooldown` | 1800 | Break after 5 throttles in a row (s) |
+| `--proxy` | — | Proxy URL, yt-dlp syntax (`socks5://127.0.0.1:1080`) |
+| `--cookies` | — | Netscape `cookies.txt` (logged-in / age-gated content) |
+| `--resume-last` | — | Re-run the last saved job (keeps AI/worker flags) |
+| `--redo ID[,ID]` | — | Re-process video ID(s): clears cache + old output first |
+| `--fresh` | — | Discard previous progress, start over |
+| `--profile` | — | Config profile name (or `YT2MD_PROFILE`) |
+| `--transcribe` | off | Transcribe captionless videos via Gemini (needs key) |
+| `--engine` | `api` | `api` or `local` (your whisper.cpp binary) |
+| `--summarize` | off | Per-video Gemini summary (needs key) |
+| `--translate LANG` | — | Translate transcript, e.g. `tr` (needs key) |
+| `--gemini-model` | gemini-2.5-flash-lite | Model for transcribe/summarize |
+| `--yes` | off | Auto-answer yes to extra-download prompts (scripts) |
+| `--dry-run` | off | List + estimate only, download nothing |
+| `--verbose` | off | Scrolling logs instead of the dashboard |
+| `--tui` | — | Force interactive mode |
+| `--self-test` | — | Offline self-check (no network) |
+| `--version` | — | Print version and exit |
+
+Subcommands: `status [dir] [--json]`, `setup [--advanced]`, `doctor [--proxy]`, `widget` (Termux:Widget one-tap resume), `share` (Termux share-sheet hook), `extras [install|remove] <name> [--yes]`, `pdf <file.md> [...]`, `watch`, `search`, `mcp`, `serve`, `serve-api`.
+
+Pacing model: `--sleep` between videos, `--fetch-gap` before each subtitle fetch, `--chunk`/`--chunk-cooldown` for long breaks, one retry on 429 (hot retries extend bans — the tool stops and waits instead), 30-min cooldown after 5 consecutive throttles. Ban detection covers real YouTube texts (bot-check, 403, IP block), not just 429.
+
+Resume model: `.done` (finished IDs), `.skip` (JSON lines: id/title/url/reason; legacy `|` fallback), `.words` counts. Skip URLs reconcile every run — `youtu.be`, `/shorts/`, `/embed/`, `/live/` forms all understood. Ctrl+C anytime, re-run to continue. Name collisions guarded per-session AND across sessions (frontmatter `video_id` check).
+
+## Watch mode
 
 ```bash
-git clone https://github.com/omersusin/tube2note && cd tube2note
-pip install -e ".[dev]"
-python3 -m tube2note        # or just: tube2note
+tube2note watch URL... -o out.md [--interval MIN] [--max 30] [-d DIR] [--layout L]
+                       [--lang LANG] [--no-clean] [--proxy P] [--cookies F] [--pdf] [--verbose]
 ```
+
+- First run collects everything (up to `--max`); later runs collect **only new videos**.
+- Seen video IDs live in `~/.cache/tube2note/watch/`. `--interval 0` (default) = check once and exit — ideal for cron / Termux:JobScheduler. `--interval 60` = loop forever (Ctrl+C stops).
+- Fatal runs (throttled out, empty result) don't mark anything seen — retried next round.
+- `subscriptions.yaml` files load via `tube2note.subs` (Python API).
+
+## Search
+
+```bash
+tube2note search "query" -d ./out [--json]
+```
+
+Stdlib full-text search over collections (skips `INDEX.md` and split parts). Prints `- [title](file) :: matching line`; `--json` emits structured hits `{file, video_id, title, line}` for scripts.
 
 ## Web UI
 
 ```bash
-tube2note serve                 # opens http://127.0.0.1:8765 in your browser (Termux: via termux-open-url)
-tube2note serve -d ~/notes      # choose the output folder
+tube2note serve                 # http://127.0.0.1:8765, opens browser (Termux: termux-open-url)
+tube2note serve -d ~/notes      # output folder (default ./tube2note-out)
 tube2note serve --no-open       # just print the link
-tube2note serve --port 9000 --token secret   # fixed port + token (for tunnels/PWA)
+tube2note serve --port 9000 --token secret   # fixed port + token
+tube2note serve --public --allow-host .serveousercontent.com   # public demo (see below)
 ```
 
-Paste URLs, tap **Start**, watch progress, tap **View / Download** when it finishes. **Preview** runs `--dry-run`. Each job is a normal `tube2note` subprocess, so resume, layouts and throttling behave exactly like the CLI (re-use an output name to resume). If `GEMINI_API_KEY` is set on the machine running the server, the Gemini options appear; the key is never sent to the page.
+Paste URLs → **Start** → progress → **View / Download**. **Preview** runs `--dry-run`. Each job is a normal `tube2note` subprocess, so resume/layouts/throttling behave exactly like the CLI (re-use an output name to resume). Gemini options appear only if `GEMINI_API_KEY` is set on the server machine — the key is never sent to the page. Safety: binds `127.0.0.1`, random per-launch token, field validation, serves only `.md`/`.pdf` from the output folder. `--host 0.0.0.0` exposes it to your LAN — only on networks you trust.
 
-Safety: it listens on `127.0.0.1` only, requires a random per-launch token (the link printed at start), validates every field, and only serves `.md`/`.pdf` files from the output folder. `--host 0.0.0.0` exposes it to your network: do that only on networks you trust.
-
-Public demo: `tube2note serve --public` (token auth stays on; Gemini options stay hidden) + `--allow-host .serveousercontent.com`, then a tunnel like `ssh -R 80:localhost:8765 serveo.net` gives you a public link to share.
-
-Exit codes: `0` = all videos ok, `1` = partial/none (cron-friendly), `2` = fatal (raised). The web UI treats 0+1 as done.
+Public demo recipe (verified): `tube2note serve --public` (token auth stays on, Gemini stays hidden) + a tunnel like `ssh -R 80:localhost:8765 serveo.net`. `--allow-host` accepts suffixes for rotating tunnel domains.
 
 ## Site backend
 
-The [site form](https://omersusin.github.io/tube2note/app.html) needs a backend (Pages is static-only). Free path: deploy `render.yaml` to Render (or `fly.toml` to Fly.io), set `BACKEND_URL` in `docs/app.js`, redeploy Pages. Full runbook in `docs/BACKEND.md`. Local alternative: `tube2note serve` + PWA shell in `docs/`.
+The [site form](https://omersusin.github.io/tube2note/app.html) needs a backend — GitHub Pages is static-only (no Python, no yt-dlp, no secrets, 10s job cap; keys in JS would leak instantly). Free path: deploy `render.yaml` to Render (750h/mo, sleeps; ephemeral FS, `OUT_DIR=/tmp`) or `fly.toml` to Fly.io (512MB for ffmpeg), set `BACKEND_URL` in `docs/app.js`, redeploy Pages. Full runbook: `docs/BACKEND.md`. Backend served by `tube2note serve-api` (FastAPI: `/api/start|state|download`, token, per-IP queue, 50-URL cap, SSRF allow-list for youtube.com/youtu.be only). Local alternative that works today: `tube2note serve` + the PWA shell in `docs/`.
+
+## MCP server
+
+```bash
+tube2note mcp
+```
+
+Stdio JSON-RPC for Claude/AI assistants. Tools: `download` (url, out, outdir, max, lang, layout, summarize, translate), `status` (dir), `dry_run` (url, max, lang). Progress output is redirected off the RPC stream. Client config:
+
+```json
+{"mcpServers": {"tube2note": {"command": "tube2note", "args": ["mcp"]}}}
+```
+
+## Python API
+
+```python
+from tube2note import api
+code, res = api.collect(["https://www.youtube.com/@SomeChannel/videos"],
+                        out="ch.md", overrides={"outdir": "./out"})
+videos, hint = api.list_videos(["..."], max_n=50)
+suggestion, found = api.language_hint(videos)
+```
+
+Plus helpers: `tube2note.links` (clickable `[label](youtu.be/ID?t=Ns)` timestamps), `tube2note.export_srt` (`.srt` per video from cached VTT), `tube2note.subs` (`subscriptions.yaml` loader, no pyyaml). Rule: apps call `api`, never `job` internals.
+
+## Gemini features
+
+Needs a free `GEMINI_API_KEY` env var (transcripts are sent to Google — the tool prints a notice every run; the key always travels in the `x-goog-api-key` header, never in URLs; one retry on 429/5xx).
+
+- `--transcribe`: audio ≤18MB for captionless videos. `--engine local` uses your whisper.cpp binary + tiny model instead (needs ffmpeg for 16kHz WAV).
+- `--summarize`: chunk-then-merge per-video summaries (no truncation).
+- `--translate LANG`: ID-marked chunks, timing preserved.
+- `--gemini-model`: default `gemini-2.5-flash-lite` (2.0-flash is dead/404).
+
+## Transcript cleaning
+
+Default `full`, `--no-clean` disables, `--clean-level light|full`:
+
+- Per-language filler removal (`en/tr/de`; unknown languages keep words — never shreds non-Latin scripts).
+- Linear repeat collapse, sentence-per-line, comma repair.
+- `light` only dedupes, never deletes words.
+
+## PDF
+
+`pip install "tube2note[pdf]"`, then `--pdf` or `tube2note pdf existing.md [...]`. Unicode TTF preferred (covers Turkish); without a font it folds to ASCII with a warning. `doctor` flags a missing Unicode font (Termux: `/system/fonts/DroidSans.ttf` works).
+
+## Extras
+
+`extras` are heavy/optional, always behind consent (config records enabled ones):
+
+| Extra | What | Size |
+|---|---|---|
+| `pdf` | PDF export (fpdf2) | ~5MB |
+| `whisper` | Offline transcription (whisper.cpp binary + tiny model) | ~75MB |
+| `faster-whisper` | Local neural STT — **PC only**, not installable on Termux | ~500MB |
+
+```bash
+tube2note extras                    # list + status
+tube2note extras install whisper    # prompts once; --yes for scripts
+tube2note extras remove pdf
+```
+
+## Configuration
+
+Precedence: CLI flags > `YT2MD_*` env vars > `--profile` > per-folder `.yt2md.json` > `setup` defaults > builtins.
+
+| Env var | Sets |
+|---|---|
+| `YT2MD_OUTDIR` / `YT2MD_LAYOUT` / `YT2MD_LANG` | output folder / layout / languages |
+| `YT2MD_CHUNK` / `YT2MD_COOLDOWN_MIN` | chunk size / break minutes |
+| `YT2MD_TIMESTAMPS` / `YT2MD_TEMPLATE` | timestamps / name template |
+| `YT2MD_CLEAN` / `YT2MD_CLEAN_LEVEL` | cleaning on/off / light/full |
+| `YT2MD_PROFILE` | profile name |
+| `GEMINI_API_KEY` | AI features |
+
+`setup` writes `~/.config/yt2md/config.json` (`defaults`, `profiles`, `last`, per-profile `last:<name>`, `lastdir`, `extras`). Unknown `--profile` names warn instead of silently falling back. Listing cache (`~/.cache/tube2note/lists/`, 6h, never caches empties) + subtitle cache (`subs/<id>.<lang>.<auto|man>.vtt`) + weekly PyPI check. `XDG_CACHE_HOME` respected.
+
+## Exit codes
+
+`0` = all videos ok · `1` = partial/none (cron-friendly) · `2` = fatal. The web UI treats 0+1 as done.
+
+## NotebookLM limits (verified 2026)
+
+- **Per source: 500,000 words / 200 MB** — identical on every plan.
+- Sources per notebook: 50 (Free) → up to 600 (Ultra).
+- Rule of thumb: one merged `.md` until 500k words, then `--split-words 400000` into multiple sources.
+
+## Troubleshooting
+
+**HTTP 429 / bot-check / 403?** YouTube throttles sustained subtitle downloads (volume throttle, ASN block, or IP ban). The tool slows down automatically. If throttled hard: stop, wait ~1h — retries extend the ban — then resume; progress is saved. `--proxy`/`--cookies` help logged-in/age-gated content.
+
+**No subtitles for a video?** Skipped and listed at the end (`## Skipped`) + in `INDEX.md`. All subtitle mirrors are tried before skipping. `--transcribe` covers captionless videos.
+
+**Big channels?** `--max 200`, `--chunk 25`, longer `--chunk-cooldown`, `--fetch-gap 0` for speed, or run overnight (`termux-wake-lock` on Android). Resume anytime.
+
+**Disk full?** Writes guard `ENOSPC` and abort cleanly instead of corrupting files.
+
+**`yt` command missing/conflicting?** The short `yt` alias collides with `yt-project` — last-installed wins; full `tube2note` name always works.
+
+**Unknown profile?** A warning names the available profiles — check the spelling.
+
+**PDF shows `?` for Turkish chars?** Missing Unicode font — `doctor` tells you; ASCII fold is a deliberate fallback, not corruption.
 
 ## Project layout
 
@@ -102,31 +280,37 @@ tube2note/
   watch.py     watch mode (new videos only)        mcp.py      MCP server over stdio
   search.py    full-text over collections          links.py    clickable timestamps
   export_srt.py  SRT export                        subs.py     subscriptions.yaml loader
+  throttle.py  token bucket + ban detection
 ```
 
-Development: `pip install -e ".[dev]" && pytest && ruff check`. The tests run the whole pipeline (and the web UI) offline against a fake yt-dlp in `tests/fake_ydl.py`.
+## Development
 
-## Configuration precedence
+```bash
+pip install -e ".[dev]" && pytest && ruff check
+```
 
-CLI flags > `YT2MD_*` env vars > `--profile` > per-folder `.yt2md.json` > `setup` defaults > builtins.
+Tests run the whole pipeline (and the web UI) offline against a fake yt-dlp in `tests/fake_ydl.py`. `tube2note --self-test` is a fast offline smoke test. CI runs pytest on 3.10–3.13 + ruff; a `v*` tag auto-publishes to PyPI via trusted publisher (no tokens).
 
-Available env vars: `YT2MD_OUTDIR`, `YT2MD_LAYOUT`, `YT2MD_LANG`, `YT2MD_CHUNK`, `YT2MD_TIMESTAMPS`, `YT2MD_COOLDOWN_MIN`, `YT2MD_TEMPLATE`, `YT2MD_CLEAN`, `YT2MD_CLEAN_LEVEL`, `YT2MD_PROFILE` (+ `GEMINI_API_KEY` for AI features).
+## Changelog
 
-## NotebookLM limits (verified 2026)
-
-- **Per source: 500,000 words / 200 MB** — identical on every plan.
-- Sources per notebook: 50 (Free) → up to 600 (Ultra).
-- Rule of thumb: one merged `.md` until 500k words, then `--split-words 400000` into multiple sources.
+- **0.8.0** — `--link-timestamps` + `--srt` wired into CLI/API/web/MCP (+resume); backend token fail-closed.
+- **0.7.0** — site backend (`serve-api`, Render/Fly files), site app form + PWA, clickable-timestamp + SRT libraries, `subscriptions.yaml`, Tauri scaffold.
+- **0.6.0** — (rolled into 0.7.0 release) same batch.
+- **0.5.0** — audit fixes (subtitle mirror fallthrough, ban-text detection, shorts/youtu.be skip regex, resume keeps AI flags, profile-typo warning, web fd-leak fix) + `tube2note.api` SDK + `search` + Pages site.
+- **0.4.0** — `watch` mode, `mcp` server, `extras install/remove`.
+- **0.3.0** — parallel fetch fix, VTT header/number fixes, public-mode key guard, clean levels, exit codes, `--redo`/cache/proxy improvements.
+- **0.2.x** — package split, `serve` web UI, Gemini transcribe/summarize/translate, TUI, PDF, resume/redo, templates.
+- **0.1.x** — initial release, trusted-publisher PyPI, PDF, CI.
 
 ## FAQ
 
-**HTTP 429?** YouTube throttles sustained subtitle downloads. tube2note slows down automatically (chunks, cooldowns). If throttled hard: stop, wait ~1h (retries extend the ban), resume — progress is saved.
+**Can I use it directly on the website?** The form needs a backend (see [Site backend](#site-backend)). Without one, use Termux/PC install or local `serve`.
 
-**No subtitles for a video?** Skipped and listed at the end (`## Skipped`) + in `INDEX.md`.
+**NotebookLM vs tube2note caps?** NotebookLM takes ~100 YouTube links; tube2note has no video cap — only the 500k-word-per-source limit, handled by `--split-words`.
 
-**Big channels?** Use `--max`, `--chunk 25`, longer `--chunk-cooldown`, or run overnight. Resume anytime.
+**Bilingual output?** Not built-in — run once per language with `--lang` + `--translate`.
 
-**`yt` command missing/conflicting?** `pip install tube2note` also installs the short `yt` command. If you have the `yt-project` package, the last-installed one wins — uninstall the other or call `tube2note` (full name always works).
+**Watch vs --resume-last?** Resume re-runs one saved job; watch tracks seen IDs across runs and only fetches new videos.
 
 **Found a bug / want a feature?** Open an issue — templates for both are included.
 

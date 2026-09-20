@@ -73,3 +73,13 @@ def test_status_json(run, home):
     run("-d", str(home / "o"), "-o", "s.md", "--lang", "en,tr", LIST)
     out = run("status", str(home / "o"), "--json")
     assert '"collection": "s.md"' in out and '"done": 3' in out
+
+
+def test_link_timestamps_and_srt(run, home):
+    out = run("-d", str(home / "o"), "-o", "l.md", "--lang", "en,tr",
+              "--link-timestamps", "--srt", LIST)
+    md = read(home / "o" / "l.md")
+    assert "youtu.be/aaaaaaaaaaa?t=" in md  # markers became clickable links
+    srt = read(home / "o" / "l_aaaaaaaaaaa.srt")
+    assert "-->" in srt and ",000" in srt and "Hello and welcome" in srt
+    assert "Done" in out
