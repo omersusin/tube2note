@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install yt-dlp pytest ruff
-      - run: ruff check --select F tube2note.py
-      - run: python -m py_compile tube2note.py && python tube2note.py --self-test
-      - run: python -m pytest -q tests
+      - run: pip install -e ".[dev]"
+      - run: ruff check
+      - run: python -m tube2note --self-test
+      - run: python -m pytest -q

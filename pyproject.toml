@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tube2note"
-version = "0.2.0"
+dynamic = ["version"]
 description = "YouTube channels, playlists and videos to a single Markdown file for NotebookLM"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-keywords = ["youtube", "transcript", "markdown", "notebooklm", "cli", "rag"]
+keywords = ["youtube", "transcript", "markdown", "notebooklm", "cli", "rag", "yt-dlp", "web-ui"]
 dependencies = ["yt-dlp"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -22,10 +22,11 @@ classifiers = [
 
 [project.optional-dependencies]
 pdf = ["fpdf2"]
+dev = ["pytest", "ruff", "build"]
 
 [project.scripts]
-tube2note = "tube2note:main"
-yt = "tube2note:main"
+tube2note = "tube2note.cli:main"
+yt = "tube2note.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/omersusin/tube2note"
@@ -33,4 +34,16 @@ Repository = "https://github.com/omersusin/tube2note"
 Issues = "https://github.com/omersusin/tube2note/issues"
 
 [tool.setuptools]
-py-modules = ["tube2note"]
+packages = ["tube2note"]
+
+[tool.setuptools.dynamic]
+version = { attr = "tube2note.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "I"]

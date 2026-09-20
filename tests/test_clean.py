@@ -1,6 +1,7 @@
 import pytest
 
-import tube2note as t
+from tube2note import clean as t
+from tube2note import llm
 
 
 @pytest.mark.parametrize("text,lang,expected", [
@@ -47,5 +48,5 @@ def test_gemini_key_never_in_url(monkeypatch):
         return R()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake)
-    assert t._gemini_request("SECRET", {"contents": []}) == "ok"
+    assert llm._gemini_request("SECRET", {"contents": []}) == "ok"
     assert "SECRET" not in seen["url"] and seen["hdr"] == "SECRET"

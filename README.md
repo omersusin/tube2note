@@ -1,6 +1,6 @@
 # tube2note — YouTube → Markdown (and PDF) for NotebookLM
 
-Turn a YouTube channel, playlist, or list of videos into **Markdown files** (or PDF) ready to feed NotebookLM / any RAG pipeline. Single file, no heavy dependencies, resumable, polite to YouTube's rate limits.
+Turn a YouTube channel, playlist, or list of videos into **Markdown files** (or PDF) ready to feed NotebookLM / any RAG pipeline. Small and dependency-light (just `yt-dlp`), resumable, polite to YouTube's rate limits. Works from the command line, a guided terminal mode, or a local web page.
 
 ```bash
 pip install tube2note yt-dlp
@@ -8,6 +8,8 @@ tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"
 # or guided mode (just type `tube2note`, answer a few questions):
 tube2note
 ```
+
+Prefer a page over a terminal? `tube2note serve` (see [Web UI](#web-ui)).
 
 PDF too? `pip install "tube2note[pdf]"`, then add `--pdf` (or run `tube2note pdf existing.md`).
 
@@ -27,7 +29,8 @@ PDF too? `pip install "tube2note[pdf]"`, then add `--pdf` (or run `tube2note pdf
 - **Personalization**: `setup` wizard, named `--profile`s, `YT2MD_*` env vars, per-folder `.yt2md.json` overrides
 - **NotebookLM-aware**: `--timestamps`, `--split-words` auto-split under the 500k-word cap, chapter-based sections, rich per-video metadata
 - **Transcript cleaning** (default on, `--no-clean` to disable): filler words, repeated phrases, one sentence per line
-- **Gemini extras** (needs free `GEMINI_API_KEY`): `--transcribe` for captionless videos, `--summarize` for per-video summaries
+- **Gemini extras** (needs free `GEMINI_API_KEY`): `--transcribe` for captionless videos, `--summarize` for per-video summaries, `--translate LANG`
+- **Web UI**: `tube2note serve` opens a phone-friendly page to start, watch and stop jobs and download the results (stdlib only, works in Termux)
 - **PDF export**: `--pdf` or `pdf file.md [...]` (needs `pip install "tube2note[pdf]"`)
 - **Status & dry-run**: `status [dir]` progress table, `--dry-run` estimate before downloading
 - **Smart & polite**: shared subtitle cache (`~/.cache/tube2note`), `--since` date filter, `--proxy`/`--cookies`, `doctor` diagnosis, Termux:Widget one-tap resume
@@ -45,9 +48,36 @@ From source:
 
 ```bash
 git clone https://github.com/omersusin/tube2note && cd tube2note
-pip install yt-dlp
-python3 tube2note.py
+pip install -e ".[dev]"
+python3 -m tube2note        # or just: tube2note
 ```
+
+## Web UI
+
+```bash
+tube2note serve                 # opens http://127.0.0.1:8765 in your browser (Termux: via termux-open-url)
+tube2note serve -d ~/notes      # choose the output folder
+tube2note serve --no-open       # just print the link
+```
+
+Paste URLs, tap **Start**, watch progress, tap **View / Download** when it finishes. **Preview** runs `--dry-run`. Each job is a normal `tube2note` subprocess, so resume, layouts and throttling behave exactly like the CLI (re-use an output name to resume). If `GEMINI_API_KEY` is set on the machine running the server, the Gemini options appear; the key is never sent to the page.
+
+Safety: it listens on `127.0.0.1` only, requires a random per-launch token (the link printed at start), validates every field, and only serves `.md`/`.pdf` files from the output folder. `--host 0.0.0.0` exposes it to your network: do that only on networks you trust.
+
+## Project layout
+
+```
+tube2note/
+  cli.py       argument parsing, dispatch          job.py      the resumable download pipeline
+  web.py       `serve` local web UI                source.py   yt-dlp listing, subtitles, cache
+  tui.py       guided interactive mode             clean.py    transcript cleanup (per-language)
+  llm.py       Gemini: transcribe/summarize/translate   whisper.py  offline transcription (optional)
+  output.py    files, index, .done/.skip logs      pdf.py      Markdown -> PDF
+  config.py    profiles / env / resume info        naming.py   safe names and templates
+  ui.py        colors, tables, dashboard           vtt.py      WebVTT parsing
+```
+
+Development: `pip install -e ".[dev]" && pytest && ruff check`. The tests run the whole pipeline (and the web UI) offline against a fake yt-dlp in `tests/fake_ydl.py`.
 
 ## Configuration precedence
 
