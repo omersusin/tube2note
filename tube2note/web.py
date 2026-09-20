@@ -268,6 +268,12 @@ class App:
         names |= set(self.extra_hosts)
         return names
 
+    def host_ok(self, host):
+        host = (host or "").split(":")[0].lower()
+        if host in self.allowed_hosts():
+            return True
+        return any(host.endswith(s) for s in self.extra_hosts if s.startswith("."))
+
     def any_host(self):
         return self.host in ("0.0.0.0", "::", "")
 
@@ -335,7 +341,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _host_ok(self):
         host = (self.headers.get("Host") or "").strip()
         name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
-        return self.app.any_host() or name in self.app.allowed_hosts()
+        return self.app.any_host() or self.app.host_ok(name)
 
     def _cookie_token(self):
         for part in (self.headers.get("Cookie") or "").split(";"):
