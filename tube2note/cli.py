@@ -52,6 +52,14 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "watch":
         from .watch import cmd_watch
         raise SystemExit(cmd_watch(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "search":
+        from .search import search_collections
+        _q = sys.argv[2] if len(sys.argv) > 2 else ""
+        _d, _j = ".", "--json" in sys.argv
+        if "-d" in sys.argv:
+            _i = sys.argv.index("-d")
+            _d = sys.argv[_i + 1] if _i + 1 < len(sys.argv) else "."
+        raise SystemExit(search_collections(_q, _d, _j))
     if len(sys.argv) > 1 and sys.argv[1] == "mcp":
         from .mcp import cmd_mcp
         cmd_mcp()
@@ -148,11 +156,19 @@ def main():
                 last.get("max_n", 100), last.get("sleep", 2.0), False, last.get("chunk", 50),
                 last.get("chunk_cooldown", 600), a.throttle_cooldown,
                 outdir=last.get("outdir", "."), ts=last.get("ts", False),
-                split_words=last.get("split_words", 0), verbose=a.verbose,
+                split_words=(a.split_words or last.get("split_words", 0)), verbose=a.verbose,
                 layout=last.get("layout", "single"), template=last.get("template", ""),
-                pdf=a.pdf, proxy=last.get("proxy"), cookiefile=last.get("cookiefile"),
-                since=last.get("since"), translate=last.get("translate"),
-                clean=last.get("clean", True), clean_level=last.get("clean_level", "full")))
+                pdf=(a.pdf or last.get("pdf", False)),
+                proxy=(a.proxy or last.get("proxy")), cookiefile=(a.cookies or last.get("cookiefile")),
+                since=(a.since or last.get("since")),
+                translate=(a.translate or last.get("translate")),
+                clean=last.get("clean", True), clean_level=(a.clean_level or last.get("clean_level", "full")),
+                transcribe=(a.transcribe or last.get("transcribe", False)),
+                summarize=(a.summarize or last.get("summarize", False)),
+                gemini_model=(a.gemini_model or last.get("gemini_model")),
+                engine=getattr(a, "engine", "api") if getattr(a, "engine", "api") != "api" else last.get("engine", "api"),
+                fetch_gap=(a.fetch_gap if a.fetch_gap is not None else last.get("fetch_gap", 10)),
+                workers=(a.workers if a.workers not in (None, 1) else last.get("workers", 1))))
     return _exit_code(run_job(a.urls, a.out, cfg["lang"], a.max, a.sleep, a.fresh, cfg["chunk"],
             cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
             ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,

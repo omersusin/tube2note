@@ -165,7 +165,7 @@ def _skip_map(skip_log):
                 if len(parts) != 3:
                     continue
                 t, u, r = parts
-            m2 = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", u or "")
+            m2 = re.search(r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})", u or "")
             m[m2.group(1) if m2 else u] = r
     return m
 

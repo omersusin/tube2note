@@ -6,13 +6,29 @@ import time
 from .ui import UI_ON
 
 
+VID_RE = r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})"
+
+
 def _is_throttle(e):
     # yt-dlp wraps HTTP errors in DownloadError/ExtractorError WITHOUT .code,
     # but the message keeps "HTTP Error 429: ..." — check both.
-    if getattr(e, "code", None) in (429, 500, 502, 503):
-        return True
+    if getattr(e, "code", None) in (403, 429, 500, 502, 503):
+        # 403 alone is not always a ban (private video), so fall through to
+        # message check for 403 and require ban phrasing.
+        if getattr(e, "code", None) != 403:
+            return True
     msg = str(e)
-    return re.search(r"\b429\b", msg) is not None or "Too Many Requests" in msg
+    if re.search(r"\b429\b", msg) is not None or "Too Many Requests" in msg:
+        return True
+    low = msg.lower()
+    if any(k in low for k in (
+        "sign in to confirm you",
+        "confirm you're not a bot",
+        "http error 403",
+        "too many requests",
+    )):
+        return True
+    return re.search(r"ip address.{0,20}block|block.{0,20}ip", low) is not None
 
 
 class Bucket:

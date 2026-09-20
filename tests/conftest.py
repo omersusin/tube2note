@@ -35,7 +35,7 @@ def run(fake, monkeypatch, capsys):
     from tube2note.cli import main
 
     def _run(*args):
-        pace = [] if args and args[0] in ("status", "setup", "doctor", "pdf", "extras", "watch", "mcp") else \
+        pace = [] if args and args[0] in ("status", "setup", "doctor", "pdf", "extras", "watch", "mcp", "search") else \
             ["--fetch-gap", "0", "--sleep", "0", "--verbose"]
         monkeypatch.setattr(sys, "argv", ["tube2note", *pace, *args])
         main()

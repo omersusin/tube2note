@@ -61,6 +61,9 @@ def save_config(store):
 
 def _merge(base, store, profile, flags, env):
     """Precedence: flags > env > profile > config defaults > builtins. Pure (testable)."""
+    if profile and profile not in store.get("profiles", {}):
+        print(f"warning: unknown profile '{profile}', using defaults (available: "
+              + (", ".join(sorted(store.get("profiles", {}))) or "none") + ")", flush=True)
     cfg = dict(base)
     cfg.update({k: v for k, v in store.get("defaults", {}).items() if k in base})
     if profile and profile in store.get("profiles", {}):

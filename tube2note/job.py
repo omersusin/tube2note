@@ -219,7 +219,9 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown, layout=layout,
                template=template, ts=ts, split_words=split_words, sleep=sleep,
                since=since, proxy=proxy, cookiefile=cookiefile, profile=profile,
-               translate=translate, clean=clean, clean_level=clean_level)
+               translate=translate, clean=clean, clean_level=clean_level,
+               transcribe=transcribe, summarize=summarize, gemini_model=gemini_model,
+               engine=engine, fetch_gap=fetch_gap, workers=workers, pdf=pdf)
     print(f"{total} videos found", flush=True)
     if not videos:
         return {"ok": 0, "skipped": 0, "total": 0}
@@ -400,7 +402,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 s = ln.strip()
                 if not s:
                     continue
-                r = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", s)
+                r = re.search(r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})", s)
                 key = r.group(1) if r else s
                 if key not in completed and key not in seen:
                     seen.add(key)
