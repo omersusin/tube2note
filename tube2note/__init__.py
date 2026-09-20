@@ -1,5 +1,5 @@
 """tube2note: YouTube channels, playlists and videos -> Markdown/PDF for NotebookLM and RAG."""
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 
 def main(argv=None):
