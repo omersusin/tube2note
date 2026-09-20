@@ -4,6 +4,7 @@ from tube2note.config import DEFAULTS, _merge
 from tube2note.source import fetch_vtt
 from tube2note.throttle import _is_throttle
 
+
 def test_fetch_vtt_falls_through():
     calls = []
     def opener(req):

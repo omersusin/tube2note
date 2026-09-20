@@ -5,7 +5,6 @@ import time
 
 from .ui import UI_ON
 
-
 VID_RE = r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})"
 
 

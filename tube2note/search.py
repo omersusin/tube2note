@@ -1,5 +1,8 @@
 """Full-text search over collections (stdlib only). `tube2note search QUERY -d DIR`."""
-import os, re, json
+import json
+import os
+import re
+
 
 def search_collections(query, base=".", as_json=False, limit=50):
     q = (query or "").lower()

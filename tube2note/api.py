@@ -4,6 +4,7 @@ from .job import _exit_code, run_job
 from .llm import _GEMINI_MODEL
 from .source import detect_langs, expand
 
+
 def collect(urls, out="tube2note.md", profile=None, overrides=None, **kw):
     """One-call collection. Returns (exit_code, result_dict). All kwargs optional."""
     cfg = resolve_config(overrides or {}, profile)
