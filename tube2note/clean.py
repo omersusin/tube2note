@@ -52,10 +52,13 @@ def _collapse_repeats(body):
     return " ".join(out)
 
 
-def _clean_text(text, lang=None):
-    """Cheap transcript cleanup: fillers (only for languages we have a list for), repeated phrases,
-    one sentence per line."""
-    filler_re = _filler_re(lang)
+def _clean_text(text, lang=None, level="full"):
+    """Transcript cleanup. Levels: off (passthrough), light (repeats + whitespace
+    only, never removes words), full (fillers + repeats + one sentence per line).
+    Filler removal is per-language; unknown languages skip fillers (light still applies)."""
+    if level == "off":
+        return text
+    filler_re = _filler_re(lang) if level == "full" else None
     out = []
     for para in text.split("\n\n"):
         tag, body = "", para
@@ -65,6 +68,11 @@ def _clean_text(text, lang=None):
         if filler_re:
             body = re.sub(r",(\s*,)+", ",", filler_re.sub("", body))  # "this, uh, works" -> "this, works"
         body = _collapse_repeats(body)
+        if level == "light":
+            body = re.sub(r"\s{2,}", " ", body).strip()
+            if body:
+                out.append(tag + body)
+            continue
         body = ABBR_RE.sub(r"\1<<prd>>", body)
         body = NUMDOT_RE.sub(r"\1<<prd>>\2", body)
         sents = [s.replace("<<prd>>", ".").strip(" ,") for s in SENT_SPLIT_RE.split(body)]

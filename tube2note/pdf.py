@@ -30,7 +30,10 @@ def _pdf_font(pdf):
     """(font_name, unicode_ok, bold_ok). Prefers a Unicode TTF (Turkish glyphs)."""
     for p in ("/system/fonts/DroidSans.ttf",
               "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-              "/data/data/com.termux/files/usr/share/fonts/DejaVuSans.ttf"):
+              "/data/data/com.termux/files/usr/share/fonts/DejaVuSans.ttf",
+              "C:/Windows/Fonts/arial.ttf",
+              "/Library/Fonts/Arial.ttf",
+              "/System/Library/Fonts/Supplemental/Arial.ttf"):
         if not os.path.exists(p):
             continue
         try:

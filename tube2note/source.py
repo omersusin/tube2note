@@ -77,6 +77,8 @@ def _list_load(urls, max_n, since):
 
 
 def _list_save(urls, max_n, since, videos, hint, complete):
+    if not videos:  # never cache an empty listing: a failed list must retry, not stick for 6h
+        return
     try:
         p = _list_cache_path(urls, since)
         os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -116,7 +118,8 @@ def expand(urls, max_n, since=None):
             seen.add(v["id"])
             uniq.append(v)
     uniq = uniq[:max_n]
-    _list_save(urls, max_n, since, uniq, hint, len(out) < max_n)
+    if uniq:  # never cache an empty listing: a failed list must retry, not stick for 6h
+        _list_save(urls, max_n, since, uniq, hint, len(out) < max_n)
     return uniq, hint
 
 

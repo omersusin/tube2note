@@ -5,6 +5,7 @@ import tempfile
 import time
 
 from .clean import _clean_text
+from .job import _exit_code
 from .config import DEFAULTS, _merge
 from .llm import _gemini_summarize, _gemini_transcribe, _split_words, _summary_prompt
 from .naming import render_template, sanitize_filename, slug
@@ -56,6 +57,9 @@ def _self_test():
     assert _clean_text("Er ist um drei Uhr zurück.", "de") == "Er ist um drei Uhr zurück."  # no German fillers
     assert _clean_text("you know you know it works", "en") == "you know it works"
     assert _clean_text("Er ist um drei Uhr zurück.") == "Er ist um drei Uhr zurück."  # unknown lang: keep words
+    assert _clean_text("um hello", "en", "light") == "um hello"  # light never removes words
+    assert _clean_text("um hello world world", "en", "light") == "um hello world"
+    assert _clean_text("um hello", "en", "off") == "um hello"
     try:
         _gemini_transcribe(b"x", "audio/mp3", "en")
         raise AssertionError("should need key")
@@ -139,4 +143,13 @@ def _self_test():
     info = {"subtitles": {"en": [{"url": "http://x/v?lang=en&fmt=vtt", "ext": "vtt"}]},
             "automatic_captions": {"tr": [{"url": "http://x/?tlang=tr", "ext": "vtt"}]}}
     assert pick_sub(info, ["tr", "en"])[0] == "en"  # translated tracks must lose to originals
+    assert _exit_code({"ok": 2, "skipped": 0, "total": 2}) == 0
+    assert _exit_code({"ok": 1, "skipped": 1, "total": 2}) == 1
+    assert _exit_code({"ok": 0, "skipped": 0, "total": 0}) == 1
+    assert _exit_code(None) == 1
+    import tempfile as _tf2
+    rd2 = _tf2.mkdtemp()
+    os.environ["XDG_CACHE_HOME"] = rd2
+    _list_save(["u9"], 100, None, [], "H", True)
+    assert _list_load(["u9"], 100, None) is None  # empty listings are never cached
     print("self-test ok")

@@ -34,9 +34,17 @@ from .vtt import _join_paras, vtt_segments
 from .whisper import _local_transcribe
 
 
+def _exit_code(result):
+    """0 = all videos ok, 1 = partial/none (cron-friendly), 2 = fatal (raised)."""
+    if not result or result.get("total", 0) == 0:
+        return 1
+    return 0 if result.get("skipped", 1) == 0 else 1
+
+
 def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
-                transcribe=False, tmpdir=None, summarize=False, gemini_model=_GEMINI_MODEL,
-                engine="api", translate=None):
+                clean_level="full", transcribe=False, tmpdir=None, summarize=False,
+                gemini_model=_GEMINI_MODEL,
+                engine="api", translate=None, proxy=None, cookiefile=None):
     """One video, network only, never raises (except disk-full).
     Returns dict with stage: extract|subs|fetch|ok."""
     res = {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
@@ -59,11 +67,11 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                                                         tmpdir)
                     else:
                         ttext, note = _try_transcribe(v["id"], langs[0] if langs else "en", tmpdir,
-                                                      gemini_model)
+                                                      gemini_model, proxy, cookiefile)
                     if ttext is not None:
                         ttext = ttext.strip()
                         if clean:
-                            ttext = _clean_text(ttext, langs[0] if langs else "en")
+                            ttext = _clean_text(ttext, langs[0] if langs else "en", clean_level)
                         res.update(lg=langs[0] if langs else "en", auto=False, text=ttext,
                                    trans=True, stage="ok")
                         res["meta"]["method"] = "gemini-transcribe"
@@ -95,7 +103,7 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                                           0 if bucket is not None else fetch_gap)
                     res["text"] = _join_paras(vtt_segments(vtt), ts, res["chapters"] or None).strip()
                     if clean:
-                        res["text"] = _clean_text(res["text"], lg)
+                        res["text"] = _clean_text(res["text"], lg, clean_level)
                     if summarize and len(res["text"].split()) > 100:
                         try:
                             res["summary"] = _gemini_summarize(res["text"], lg, gemini_model)
@@ -130,15 +138,16 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
 
 
 def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
-            transcribe=False, tmpdir=None, summarize=False, gemini_model=_GEMINI_MODEL,
-            engine="api", translate=None):
+            clean_level="full", transcribe=False, tmpdir=None, summarize=False,
+            gemini_model=_GEMINI_MODEL, engine="api", translate=None,
+            proxy=None, cookiefile=None):
     """Yield (i, v, res) in submission order; purely serial when workers<=1.
     Parallel submits in small batches so a cooldown stops new work quickly."""
     if workers <= 1:
         for i, v in work:
             yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap, clean,
-                                    transcribe, tmpdir, summarize, gemini_model, engine,
-                                    translate)
+                                    clean_level, transcribe, tmpdir, summarize, gemini_model,
+                                    engine, translate, proxy, cookiefile)
         return
     with ThreadPoolExecutor(max_workers=workers) as ex:
         it = iter(work)
@@ -147,8 +156,8 @@ def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
             if not batch:
                 return
             futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap,
-                                     clean, transcribe, tmpdir, summarize, gemini_model,
-                                     engine, translate)) for i, v in batch]
+                                     clean, clean_level, transcribe, tmpdir, summarize,
+                                     gemini_model, engine, translate, proxy, cookiefile)) for i, v in batch]
             for i, v, fu in futs:
                 try:
                     yield i, v, fu.result()
@@ -166,7 +175,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             throttle_cooldown=1800, videos=None, outdir=".", ts=False, split_words=0,
             verbose=False, layout="single", template="", pdf=False,
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
-            workers=1, clean=True, transcribe=False, summarize=False,
+            workers=1, clean=True, clean_level="full", transcribe=False, summarize=False,
             gemini_model=_GEMINI_MODEL, engine="api", translate=None, auto_yes=False):
     if videos is None:
         videos, _ = expand(urls, max_n, since)
@@ -196,13 +205,13 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     total = len(videos)
     if transcribe and not os.environ.get("GEMINI_API_KEY", "") and engine != "local":
         print("transcribe needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
-        return
+        return {"ok": 0, "skipped": 0, "total": total}
     if transcribe and engine == "local" and not ensure_extra("whisper", auto_yes):
         print("local transcription unavailable — stopping before any work.")
-        return
+        return {"ok": 0, "skipped": 0, "total": total}
     if summarize and not os.environ.get("GEMINI_API_KEY", ""):
         print("summarize needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
-        return
+        return {"ok": 0, "skipped": 0, "total": total}
     if (transcribe or summarize or translate) and os.environ.get("GEMINI_API_KEY", ""):
         print("notice: transcripts/summaries will be sent to the Google Gemini API.", flush=True)
     _save_last(urls=urls, out=os.path.basename(out),
@@ -210,10 +219,10 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown, layout=layout,
                template=template, ts=ts, split_words=split_words, sleep=sleep,
                since=since, proxy=proxy, cookiefile=cookiefile, profile=profile,
-               translate=translate)
+               translate=translate, clean=clean, clean_level=clean_level)
     print(f"{total} videos found", flush=True)
     if not videos:
-        return
+        return {"ok": 0, "skipped": 0, "total": 0}
     done_log, skip_log = out + ".done", out + ".skip"
     done = set()
     if not fresh and os.path.exists(done_log):
@@ -263,8 +272,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         print(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
     with YoutubeDL(ydl_opts):
         for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap,
-                                clean, transcribe, tmpdir, summarize, gemini_model,
-                                engine, translate):
+                                clean, clean_level, transcribe, tmpdir, summarize, gemini_model,
+                                engine, translate, proxy, cookiefile):
             if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
                 if verbose:
                     log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
@@ -453,3 +462,4 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     else:
         dash_end()
         print(f"Checkpoint: {ok} videos, {words} words -> {out} (total: {ndone}/{len(videos)})")
+    return {"ok": ok, "skipped": nskip, "total": len(videos)}

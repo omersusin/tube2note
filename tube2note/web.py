@@ -195,7 +195,7 @@ class Job:
         elif self.stopped:
             state = "stopped"
         else:
-            state = "done" if rc == 0 else "failed"
+            state = "done" if rc in (0, 1) else "failed"  # 1 = partial success (some videos skipped)
         return {"state": state, "name": self.name, "dry_run": self.dry_run, "progress": progress,
                 "current": current, "log": lines, "returncode": rc,
                 "elapsed": int((self.ended or time.time()) - self.started)}

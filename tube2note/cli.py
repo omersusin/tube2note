@@ -13,7 +13,7 @@ from .commands import (
     cmd_widget,
 )
 from .config import load_config, resolve_config
-from .job import run_job
+from .job import _exit_code, run_job
 from .llm import _GEMINI_MODEL
 from .output import _purge_video
 from .pdf import md_to_pdf
@@ -75,6 +75,7 @@ def main():
     ap.add_argument("--timestamps", action="store_true", default=None, help="keep [MM:SS] markers in transcripts")
     ap.add_argument("--clean", dest="clean", action="store_true", default=None, help="clean transcripts (default on)")
     ap.add_argument("--no-clean", dest="clean", action="store_false", help="keep raw transcripts")
+    ap.add_argument("--clean-level", default=None, help="cleaning strength: light or full (default full)")
     ap.add_argument("--since", default=None, help="only videos published on/after YYYY-MM-DD")
     ap.add_argument("--resume-last", action="store_true", help="re-run the last saved collection job")
     ap.add_argument("--redo", default=None, help="re-process video ID(s), comma separated (clears cache + old output)")
@@ -110,11 +111,14 @@ def main():
             print("\nExit.")
         return
     profile = a.profile or os.environ.get("YT2MD_PROFILE") or None
+    if a.layout is not None and a.layout not in ("single", "videos", "tree"):
+        print(f"Warning: unknown --layout '{a.layout}', using single.")
     cfg = resolve_config({"outdir": a.dir, "layout": a.layout, "lang": a.lang,
                           "chunk": a.chunk, "timestamps": a.timestamps,
                           "chunk_cooldown_min": (a.chunk_cooldown // 60
                                                  if a.chunk_cooldown is not None else None),
-                          "template": a.name_template, "clean": a.clean}, profile)
+                          "template": a.name_template, "clean": a.clean,
+                          "clean_level": a.clean_level}, profile)
     fetch_gap = a.fetch_gap if a.fetch_gap is not None else 10
     workers = min(4, max(1, a.workers or 1))
     if a.redo:
@@ -133,21 +137,22 @@ def main():
         last = (store.get("last:" + profile) if profile else None) or store.get("last")
         if not last or not last.get("urls"):
             ap.error("no saved job: run once first (resume info is stored automatically)")
-        run_job(last["urls"], last.get("out", "tube2note.md"), last.get("lang", cfg["lang"]),
+        return _exit_code(run_job(last["urls"], last.get("out", "tube2note.md"), last.get("lang", cfg["lang"]),
                 last.get("max_n", 100), last.get("sleep", 2.0), False, last.get("chunk", 50),
                 last.get("chunk_cooldown", 600), a.throttle_cooldown,
                 outdir=last.get("outdir", "."), ts=last.get("ts", False),
                 split_words=last.get("split_words", 0), verbose=a.verbose,
                 layout=last.get("layout", "single"), template=last.get("template", ""),
                 pdf=a.pdf, proxy=last.get("proxy"), cookiefile=last.get("cookiefile"),
-                since=last.get("since"), translate=last.get("translate"))
-        return
-    run_job(a.urls, a.out, cfg["lang"], a.max, a.sleep, a.fresh, cfg["chunk"],
+                since=last.get("since"), translate=last.get("translate"),
+                clean=last.get("clean", True), clean_level=last.get("clean_level", "full")))
+    return _exit_code(run_job(a.urls, a.out, cfg["lang"], a.max, a.sleep, a.fresh, cfg["chunk"],
             cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
             ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
             layout=cfg["layout"], template=cfg["template"], pdf=a.pdf,
             proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile,
             fetch_gap=fetch_gap, workers=workers, clean=cfg["clean"],
+            clean_level=a.clean_level or cfg["clean_level"],
             transcribe=a.transcribe, summarize=a.summarize,
             gemini_model=a.gemini_model or _GEMINI_MODEL, engine=a.engine,
-            translate=a.translate, auto_yes=a.yes)
+            translate=a.translate, auto_yes=a.yes))

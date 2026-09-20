@@ -130,7 +130,9 @@ def tui():
         except OSError:
             pass
         lay = input(f"Layout (single/videos/tree) [{cfg['layout']}] > ").strip().lower() or cfg["layout"]
-        lay = lay if lay in ("single", "videos", "tree") else "single"
+        if lay not in ("single", "videos", "tree"):
+            print(f"Unknown layout '{lay}', using single.")
+            lay = "single"
         lang = input(f"Languages [{sug}] > ").strip() or sug
         mx = input(f"Max videos [{len(videos)}] > ").strip() or str(len(videos))
         try:
@@ -174,7 +176,7 @@ def tui():
         try:
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
                     layout=lay, template=tmp, pdf=pdf, since=since, profile=prof, workers=wk,
-                    clean=cl)
+                    clean=cl, clean_level=cfg["clean_level"])
         except KeyboardInterrupt:
             print("\nCancelled.")
         again = input("\nNew job? [Enter]=yes, q=quit > ").strip()

@@ -19,16 +19,18 @@ CONFIG_PATH = os.path.expanduser("~/.config/yt2md/config.json")
 
 
 DEFAULTS = {"outdir": ".", "layout": "single", "timestamps": False, "chunk": 50,
-            "chunk_cooldown_min": 10, "lang": "tr,en", "template": "", "clean": True}
+            "chunk_cooldown_min": 10, "lang": "tr,en", "template": "", "clean": True,
+            "clean_level": "full"}
 
 
 ENV_MAP = {"outdir": "YT2MD_OUTDIR", "layout": "YT2MD_LAYOUT", "lang": "YT2MD_LANG",
            "chunk": "YT2MD_CHUNK", "timestamps": "YT2MD_TIMESTAMPS",
            "chunk_cooldown_min": "YT2MD_COOLDOWN_MIN", "template": "YT2MD_TEMPLATE",
-           "clean": "YT2MD_CLEAN"}
+           "clean": "YT2MD_CLEAN", "clean_level": "YT2MD_CLEAN_LEVEL"}
 
 
 def load_config():
+    """Config file: {"defaults": {...}, "profiles": {name: {...}}}. Old flat files count as defaults."""
     """Config file: {"defaults": {...}, "profiles": {name: {...}}}. Old flat files count as defaults."""
     raw = {}
     try:
@@ -77,6 +79,8 @@ def _merge(base, store, profile, flags, env):
             cfg[key] = cfg[key].lower() in ("1", "y", "yes", "true")
     if cfg.get("layout") not in ("single", "videos", "tree"):
         cfg["layout"] = base["layout"]
+    if cfg.get("clean_level") not in ("light", "full"):
+        cfg["clean_level"] = base["clean_level"]
     return cfg
 
 

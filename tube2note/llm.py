@@ -14,12 +14,16 @@ AUDIO_MIMES = {"mp3": "audio/mp3", "wav": "audio/wav", "aac": "audio/aac",
 AUDIO_MAX_BYTES = 18 * 1024 * 1024
 
 
-def _download_audio(vid, tmpdir):
+def _download_audio(vid, tmpdir, proxy=None, cookiefile=None):
     """Audio-only download, no ffmpeg: returns (path, ext) or (None, reason)."""
     out = os.path.join(tmpdir, vid + ".%(ext)s")
     opts = {"quiet": True, "no_warnings": True, "skip_download": False,
             "format": "bestaudio[ext=mp3]/bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
             "outtmpl": out, "socket_timeout": 30}
+    if proxy:
+        opts["proxy"] = proxy
+    if cookiefile:
+        opts["cookiefile"] = os.path.expanduser(cookiefile)
     try:
         with YoutubeDL(opts) as ydl:
             ydl.download([f"https://www.youtube.com/watch?v={vid}"])
@@ -115,11 +119,14 @@ def _translate_chunks(text, target, model, budget=4000):
         prompt = (f"Translate the following to {target}. Keep each [N] marker at the start "
                   f"of its paragraph, translate only the text. Reply with the marked paragraphs only:\n\n{marked}")
         resp = _gemini_call(prompt, model)
-        lines = {}
+        lines, cur = {}, None
         for ln in resp.splitlines():
             m = re.match(r"\[(\d+)\]\s*(.*)", ln.strip())
             if m:
-                lines[int(m.group(1))] = m.group(2)
+                cur = int(m.group(1))
+                lines[cur] = m.group(2)
+            elif cur is not None and ln.strip():
+                lines[cur] += "\n" + ln.strip()  # model wrapped one paragraph over lines
         out.append("\n\n".join(lines.get(i, c[i]) for i in range(len(c))))
     return "\n\n".join(out)
 
@@ -151,9 +158,9 @@ def _gemini_summarize(text, lang="en", model=_GEMINI_MODEL):
     return _gemini_call(merge, model)
 
 
-def _try_transcribe(vid, lang, tmpdir, model=_GEMINI_MODEL):
+def _try_transcribe(vid, lang, tmpdir, model=_GEMINI_MODEL, proxy=None, cookiefile=None):
     """Captionless fallback: audio download + Gemini. Returns (text, note) or (None, reason)."""
-    path, ext = _download_audio(vid, tmpdir)
+    path, ext = _download_audio(vid, tmpdir, proxy, cookiefile)
     if path is None:
         return None, ext
     try:
