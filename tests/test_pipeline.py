@@ -158,3 +158,10 @@ def test_dedupe_skips_same_transcript(home, monkeypatch):
     assert res == {"ok": 1, "skipped": 1, "total": 2}
     md = (home / "o" / "d.md").read_text(encoding="utf-8")
     assert md.count("Video ID: ") == 1 and "duplicate transcript" in md
+
+
+def test_obsidian_frontmatter(run, home):
+    run("-d", str(home / "o"), "-o", "b.md", "--layout", "videos", "--lang", "en,tr",
+        "--obsidian", "https://www.youtube.com/playlist?list=PLfake")
+    md = read(home / "o" / "videos" / "Alpha talk [aaaaaaaaaaa].md")
+    assert "tags: [youtube, transcript]" in md and "aliases:" in md

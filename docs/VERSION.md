@@ -1,4 +1,9 @@
-[![version v0.12.0](https://img.shields.io/badge/version-v0.12.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.12.0)
+[![version v0.13.0](https://img.shields.io/badge/version-v0.13.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.13.0)
+
+## v0.12.0
+5a06957 0.12.0: sqlite store, epub, rss fast-path, dedupe
+646ac7a README+site: live demo link, public mode accuracy
+b86c60d Site: live demo link (public ngrok serve)
 
 ## v0.11.0
 6ee0c62 0.11.0: watch subs, TUI AI prompts, site AI fields, backend suite

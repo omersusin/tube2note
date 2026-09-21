@@ -95,7 +95,7 @@ def split_output(out, budget):
     return paths
 
 
-def _frontmatter(title, wurl, channel, vid, lg, auto, meta=None):
+def _frontmatter(title, wurl, channel, vid, lg, auto, meta=None, obsidian=False):
     def clean(s):
         s = " ".join(str(s).split()).replace('"', "'").replace("\\", "/")
         return s.lstrip("-?:,{}[]&*!|>#%@` ").strip() or "unknown"
@@ -103,6 +103,8 @@ def _frontmatter(title, wurl, channel, vid, lg, auto, meta=None):
     c = clean(channel or "unknown")
     out = (f"---\ntitle: \"{t}\"\nsource: {wurl}\nchannel: \"{c}\"\n"
            f"video_id: {vid}\nlanguage: {lg}{' (auto)' if auto else ''}\n")
+    if obsidian:  # Dataview-friendly: tags + alias
+        out += "tags: [youtube, transcript]\naliases: [\"{}\"]\n".format(t)
     if meta:
         if meta.get("method"):
             out += f"method: {meta['method']}\n"

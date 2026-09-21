@@ -187,7 +187,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
             workers=1, clean=True, clean_level="full", transcribe=False, summarize=False,
             gemini_model=_GEMINI_MODEL, engine="api", translate=None, auto_yes=False,
-            link_timestamps=False, srt=False, epub=False, dedupe=True):
+            link_timestamps=False, srt=False, epub=False, dedupe=True, obsidian=False):
     if videos is None:
         videos = None
         if since and len(urls) == 1:  # fast path: channel RSS avoids the full listing
@@ -244,7 +244,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                translate=translate, clean=clean, clean_level=clean_level,
                transcribe=transcribe, summarize=summarize, gemini_model=gemini_model,
                 engine=engine, fetch_gap=fetch_gap, workers=workers, pdf=pdf,
-                link_timestamps=link_timestamps, srt=srt, epub=epub, dedupe=dedupe)
+                link_timestamps=link_timestamps, srt=srt, epub=epub, dedupe=dedupe,
+                obsidian=obsidian)
     print(f"{total} videos found", flush=True)
     if not videos:
         return {"ok": 0, "skipped": 0, "total": 0}
@@ -401,7 +402,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                         os.makedirs(os.path.dirname(vp), exist_ok=True)
                         with open(vp, "w", encoding="utf-8") as vf:
                             vf.write(_frontmatter(title, wurl, v.get("channel") or res.get("channel"),
-                                                  v["id"], lg, auto, res.get("meta")))
+                                                  v["id"], lg, auto, res.get("meta"), obsidian))
                             vf.write(f"## {title}\n")
                             if res.get("summary"):
                                 vf.write(f"\n### Summary\n{res['summary']}\n")

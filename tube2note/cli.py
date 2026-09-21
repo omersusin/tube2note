@@ -121,6 +121,8 @@ def main():
     ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
     ap.add_argument("--pdf", action="store_true", help="also write PDF next to the Markdown (needs fpdf2)")
     ap.add_argument("--epub", action="store_true", help="also write EPUB next to the Markdown (stdlib, for e-readers)")
+    ap.add_argument("--obsidian", action="store_true",
+                    help="Obsidian-friendly notes: tags+aliases in frontmatter (pairs with --layout videos)")
     ap.add_argument("--no-dedupe", dest="no_dedupe", action="store_true",
                     help="keep duplicate transcripts (default: skip same-text re-uploads)")
     ap.add_argument("--transcribe", action="store_true", help="transcribe captionless videos via Gemini API (needs GEMINI_API_KEY)")
@@ -185,6 +187,7 @@ def main():
                 layout=last.get("layout", "single"), template=last.get("template", ""),
                 pdf=(a.pdf or last.get("pdf", False)),
                 epub=(a.epub or last.get("epub", False)),
+                obsidian=(a.obsidian or last.get("obsidian", False)),
                 dedupe=(False if a.no_dedupe else last.get("dedupe", True)),
                 proxy=(a.proxy or last.get("proxy")), cookiefile=(a.cookies or last.get("cookiefile")),
                 since=(a.since or last.get("since")),
@@ -211,4 +214,4 @@ def main():
             gemini_model=a.gemini_model or _GEMINI_MODEL, engine=a.engine,
             translate=a.translate, auto_yes=a.yes,
             link_timestamps=bool(a.link_timestamps), srt=bool(a.srt), epub=a.epub,
-            dedupe=not a.no_dedupe))
+            dedupe=not a.no_dedupe, obsidian=a.obsidian))

@@ -97,6 +97,7 @@ tube2note [URL ...] [options] | status | setup | doctor | widget | share
 | `--pdf` | off | Also write PDF next to the Markdown |
 | `--epub` | off | Also write EPUB next to the Markdown (for e-readers) |
 | `--no-dedupe` | off | Keep duplicate transcripts (default: skip same-text re-uploads) |
+| `--obsidian` | off | Obsidian-friendly notes: tags + aliases in frontmatter (pairs with `--layout videos`) |
 | `--sleep` | 2.0 | Pause between videos (s) |
 | `--chunk` | 50 | Long break every N videos |
 | `--chunk-cooldown` | 10 min | Break between chunks, in seconds |
@@ -302,6 +303,7 @@ Tests run the whole pipeline (and the web UI) offline against a fake yt-dlp in `
 
 ## Changelog
 
+- **0.13.0** — `--obsidian` notes (tags + aliases, Dataview-ready).
 - **0.12.0** — deferred batch: SQLite resume store (+legacy migration), EPUB export (stdlib), RSS fast-path for `--since`, transcript-hash dedupe.
 - **0.11.0** — remaining gaps: `watch --subs` subscriptions file, TUI transcribe/summarize/translate prompts, site form AI fields + local-app button, skip-guarded backend test suite (fastapi = server-only by design).
 - **0.10.0** — round-2 excavation: search JSON limit fix, site form link/srt + local-app button, BACKEND precision (OUT_DIR, MAX_JOBS, /healthz), 16 adversarial tests, CWD-proof PWA tests, skip-guarded backend suite.
