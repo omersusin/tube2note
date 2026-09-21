@@ -1,0 +1,33 @@
+name: tauri
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-22.04, triple: x86_64-unknown-linux-gnu}
+          - {os: windows-latest, triple: x86_64-pc-windows-msvc}
+          - {os: macos-latest, triple: aarch64-apple-darwin}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -U pyinstaller yt-dlp
+      - run: python -m PyInstaller --onefile --name tube2note-serve ./serve_entry.py
+      - run: mv dist/tube2note-serve* src-tauri/binaries/tube2note-serve-${{ matrix.triple }}${{ endsWith(matrix.triple, 'msvc') && '.exe' || '' }}
+      - uses: dtolnay/rust-toolchain@stable
+      - if: matrix.os == 'ubuntu-22.04'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseDraft: true
+          args: --target ${{ matrix.triple }}

@@ -7,9 +7,42 @@ import re
 from .ui import table
 
 
+def _purge_jsonl(out, vid):
+    """Drop one video's rows from <out>.jsonl (atomic replace)."""
+    p = out + ".jsonl"
+    if not os.path.exists(p):
+        return False
+    try:
+        lines = open(p, encoding="utf-8").read().splitlines()
+    except OSError:
+        return False
+    kept, dropped = [], False
+    for ln in lines:
+        try:
+            d = json.loads(ln)
+            if d.get("video_id") == vid:
+                dropped = True
+                continue
+        except ValueError:
+            if vid in ln:  # corrupt line: conservative drop
+                dropped = True
+                continue
+        kept.append(ln)
+    if dropped:
+        tmp = p + ".tmp"
+        try:
+            open(tmp, "w", encoding="utf-8").write(("\n".join(kept) + "\n") if kept else "")
+            os.replace(tmp, p)
+        except OSError:
+            return False
+    return dropped
+
+
 def _purge_video(out, root, layout, vid):
     """Forget one video everywhere so --redo reprocesses it cleanly."""
     removed = []
+    if _purge_jsonl(out, vid):
+        removed.append("jsonl")
     db = out + ".db"
     if os.path.exists(db):
         try:

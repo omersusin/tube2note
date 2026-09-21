@@ -41,3 +41,23 @@ def test_incomplete_list_refetch(home):
     p = _list_cache_path(["u-inc"], None)
     json.dump(d, open(p, "w", encoding="utf-8"))
     assert _list_load(["u-inc"], 10, None) is None
+
+def test_retry_after_hint():
+    from tube2note.throttle import _retry_after_hint as H
+
+    class E(Exception):
+        def __init__(self, msg="", headers=None):
+            super().__init__(msg)
+            self.headers = headers
+    assert H(E("429 Retry-After: 120"), 60) == 120
+    assert H(E("HTTP Error 429", {"Retry-After": "600"}), 60) == 600
+    assert H(E("boom"), 60) == 60
+    assert H(E("Retry-After: soon"), 60) == 60
+    assert H(E("Retry-After: Wed, 21 Oct 2015 07:28:00 GMT"), 60) == 60
+    assert H(E("Retry-After: 5"), 60) == 60
+    assert H(E("Retry-After: 999999"), 60) == 7200
+    assert H(E("Retry-After: 0"), 60) == 60 and H(E("Retry-After: -3"), 60) == 60
+    assert H(E("Retry-After: 120, 120"), 60) == 120
+    assert H("plain string Retry-After: 90", 60) == 90 and H(None, 60) == 60
+    assert H(E("x", {"Retry-After": None}), 60) == 60
+    assert H(E("x", {"retry-after": "30"}), 10) == 30

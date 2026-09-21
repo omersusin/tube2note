@@ -128,10 +128,14 @@ def build_argv(p, base_dir, python=None):
         if _bool(p.get("summarize")):
             argv.append("--summarize")
         target = str(p.get("translate") or "").strip()
-        if target:
-            if not TARGET_RE.match(target):
-                raise ValueError("Translate target must be a language code like tr")
-            argv += ["--translate", target]
+        bil = str(p.get("bilingual") or "").strip()
+        if target and bil:
+            raise ValueError("Translate and bilingual are mutually exclusive")
+        for label, val in (("Translate", target), ("Bilingual", bil)):
+            if val:
+                if not TARGET_RE.match(val):
+                    raise ValueError(f"{label} target must be a language code like tr")
+                argv += ["--translate", val] if label == "Translate" else ["--bilingual", val]
     argv.append("--")
     argv += urls
     return argv
@@ -319,7 +323,7 @@ class App:
         if self.public and isinstance(payload, dict):
             # anonymous visitors must never spend the host's Gemini quota
             payload = {k: v for k, v in payload.items()
-                       if k not in ("transcribe", "summarize", "translate")}
+                       if k not in ("transcribe", "summarize", "translate", "bilingual")}
         argv = self.argv_builder(payload, self.base_dir)
         with self.lock:
             if self.job and self.job.running:

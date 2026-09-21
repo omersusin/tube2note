@@ -186,3 +186,78 @@ def test_cookies_from_browser_reaches_ydl(home, monkeypatch, fake):
                                       "https://www.youtube.com/playlist?list=PLfake"])
     main()
     assert seen.get("cookiesfrombrowser") == "chrome"
+
+
+def test_jsonl_rows_resume_redo(run, home):
+    import json
+    args = ("-d", str(home / "o"), "-o", "s.md", "--lang", "en,tr", "--jsonl",
+            "https://www.youtube.com/playlist?list=PLfake")
+
+    def rows():
+        return [json.loads(l) for l in open(home / "o" / "s.md.jsonl", encoding="utf-8")]
+    run(*args)
+    assert {r["video_id"] for r in rows()} == {"aaaaaaaaaaa", "bbbbbbbbbbb", "ddddddddddd"}
+    r0 = rows()[0]
+    assert set(r0) == {"video_id", "title", "url", "channel", "lang", "text", "words"}
+    assert r0["words"] == len(r0["text"].split())
+    n = len(rows())
+    run(*args)  # resume: no new rows
+    assert len(rows()) == n
+    run("-d", str(home / "o"), "-o", "s.md", "--lang", "en,tr", "--jsonl",
+        "--redo", "aaaaaaaaaaa", "https://www.youtube.com/watch?v=aaaaaaaaaaa")
+    vids = [r["video_id"] for r in rows()]
+    assert vids.count("aaaaaaaaaaa") == 1
+
+
+def test_stdout_clean_pipe(home, monkeypatch, capsys, fake):
+    import sys
+
+    from tube2note.cli import main
+    monkeypatch.setattr(sys, "argv", ["tube2note", "--fetch-gap", "0", "--sleep", "0",
+                                      "-o", "-", "--lang", "en,tr",
+                                      "https://www.youtube.com/playlist?list=PLfake"])
+    main()
+    r = capsys.readouterr()
+    assert "## 1. Alpha talk" in r.out and "Hello and welcome to the show." in r.out
+    assert "Done" not in r.out and "videos found" not in r.out and "videos ·" not in r.out
+    odir = home / "o"
+    assert (not odir.exists()) or list(odir.iterdir()) == []  # NO files written
+
+
+def test_stdout_rejects_sidecars(home, monkeypatch, capsys, fake):
+    import sys
+
+    import pytest
+
+    from tube2note.cli import main
+    for extra in (["--pdf"], ["--epub"], ["--srt"], ["--split-words", "10"],
+                  ["--layout", "videos"], ["--jsonl"]):
+        monkeypatch.setattr(sys, "argv", ["tube2note", "-o", "-", *extra,
+                                          "https://www.youtube.com/playlist?list=PLfake"])
+        with pytest.raises(SystemExit):
+            main()
+        capsys.readouterr()
+
+
+def test_bilingual_interleaved(run, home, fake):
+    run("-d", str(home / "o"), "-o", "b.md", "--lang", "en,tr", "--bilingual", "de", LIST)
+    md = read(home / "o" / "b.md")
+    assert "### Bilingual (de)" in md and "> TR: " in md
+    assert "### Translation" not in md  # interleaved, not sections
+
+
+def test_bilingual_mismatch_falls_back(run, home, fake, monkeypatch):
+    import tube2note.job as J
+    monkeypatch.setattr(J, "_translate_chunks", lambda t, tg, m: "single merged para")
+    run("-d", str(home / "o"), "-o", "b2.md", "--lang", "en,tr", "--bilingual", "de", LIST)
+    assert "### Translation (de)" in read(home / "o" / "b2.md")
+
+
+def test_zip_bilingual_unit():
+    from tube2note.llm import _zip_bilingual
+    ok, b = _zip_bilingual("a\nb", "A\nB")
+    assert ok and "> A" in b
+    assert _zip_bilingual("a\nb", "A")[0] is False
+    assert _zip_bilingual("", "")[0] is False
+    ok, b = _zip_bilingual("### Intro\nhello", "### Giris\nmerhaba")
+    assert ok and "> ###" not in b

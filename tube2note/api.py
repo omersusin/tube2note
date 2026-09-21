@@ -22,10 +22,10 @@ def collect(urls, out="tube2note.md", profile=None, overrides=None, **kw):
         clean=kw.get("clean", cfg["clean"]), clean_level=kw.get("clean_level", cfg["clean_level"]),
         transcribe=kw.get("transcribe", False), summarize=kw.get("summarize", False),
         gemini_model=kw.get("gemini_model") or _GEMINI_MODEL, engine=kw.get("engine", "api"),
-        translate=kw.get("translate"), auto_yes=kw.get("auto_yes", False),
+        translate=kw.get("translate"), bilingual=kw.get("bilingual"), auto_yes=kw.get("auto_yes", False),
         link_timestamps=kw.get("link_timestamps", False), srt=kw.get("srt", False),
         epub=kw.get("epub", False), dedupe=kw.get("dedupe", True),
-        obsidian=kw.get("obsidian", False),
+        obsidian=kw.get("obsidian", False), jsonl=kw.get("jsonl", False),
         cookies_from_browser=kw.get("cookies_from_browser"))
     return _exit_code(res), (res or {})
 

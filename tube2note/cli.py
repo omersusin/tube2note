@@ -119,6 +119,7 @@ def main():
     ap.add_argument("--name-template", default=None, help='per-video path template, e.g. "{channel}/{title} [{id}]"')
     ap.add_argument("--profile", default=None, help="config profile name (or YT2MD_PROFILE)")
     ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
+    ap.add_argument("--jsonl", action="store_true", help="also append one JSON line per video to <out>.jsonl")
     ap.add_argument("--pdf", action="store_true", help="also write PDF next to the Markdown (needs fpdf2)")
     ap.add_argument("--epub", action="store_true", help="also write EPUB next to the Markdown (stdlib, for e-readers)")
     ap.add_argument("--obsidian", action="store_true",
@@ -130,6 +131,7 @@ def main():
     ap.add_argument("--yes", action="store_true", help="auto-answer yes to extra download prompts")
     ap.add_argument("--summarize", action="store_true", help="add Gemini summary per video (needs GEMINI_API_KEY)")
     ap.add_argument("--translate", default=None, help="translate transcript to LANG via Gemini (needs GEMINI_API_KEY), e.g. tr")
+    ap.add_argument("--bilingual", default=None, help="source + translation interleaved per paragraph via Gemini (needs GEMINI_API_KEY), e.g. tr")
     ap.add_argument("--gemini-model", default=None, help="Gemini model for transcribe/summarize (default: gemini-2.5-flash-lite)")
     ap.add_argument("--proxy", default=None, help="proxy URL for all requests (yt-dlp syntax, e.g. socks5://127.0.0.1:1080)")
     ap.add_argument("--cookies", default=None, help="Netscape cookies.txt file (helps logged-in/age-gated content)")
@@ -148,6 +150,26 @@ def main():
     if a.version:
         print(f"tube2note {_pkg_version()}")
         return
+    if a.bilingual and a.translate:
+        ap.error("--bilingual and --translate are mutually exclusive")
+    if a.out == "-":
+        bad = []
+        if a.pdf:
+            bad.append("--pdf")
+        if a.epub:
+            bad.append("--epub")
+        if a.srt:
+            bad.append("--srt")
+        if (a.split_words or 0) > 0:
+            bad.append("--split-words")
+        if (a.layout or "single") != "single":
+            bad.append("--layout")
+        if getattr(a, "jsonl", False):
+            bad.append("--jsonl")
+        if bad:
+            ap.error("incompatible with -o - (stdout): " + ", ".join(bad))
+        if not a.urls and not a.redo and not a.resume_last:
+            ap.error("no URLs for stdout mode")
     if a.tui or (not a.urls and not a.redo and not a.resume_last):
         try:
             tui()
@@ -181,6 +203,8 @@ def main():
         last = (store.get("last:" + profile) if profile else None) or store.get("last")
         if not last or not last.get("urls"):
             ap.error("no saved job: run once first (resume info is stored automatically)")
+        if (a.bilingual or last.get("bilingual")) and (a.translate or last.get("translate")):
+            ap.error("--bilingual and --translate are mutually exclusive")
         return _exit_code(run_job(last["urls"], last.get("out", "tube2note.md"), last.get("lang", cfg["lang"]),
                 last.get("max_n", 100), last.get("sleep", 2.0), False, last.get("chunk", 50),
                 last.get("chunk_cooldown", 600), a.throttle_cooldown,
@@ -195,10 +219,11 @@ def main():
                 cookies_from_browser=(a.cookies_from_browser or last.get("cookies_from_browser")),
                 since=(a.since or last.get("since")),
                 translate=(a.translate or last.get("translate")),
-                clean=last.get("clean", True), clean_level=(a.clean_level or last.get("clean_level", "full")),
-                link_timestamps=(a.link_timestamps if a.link_timestamps is not None
+                bilingual=(a.bilingual or last.get("bilingual")),
+                clean=last.get("clean", True), clean_level=(a.clean_level or last.get("clean_level", "full")),                link_timestamps=(a.link_timestamps if a.link_timestamps is not None
                                  else last.get("link_timestamps", False)),
                 srt=(a.srt if a.srt is not None else last.get("srt", False)),
+                jsonl=(a.jsonl or last.get("jsonl", False)),
                 transcribe=(a.transcribe or last.get("transcribe", False)),
                 summarize=(a.summarize or last.get("summarize", False)),
                 gemini_model=(a.gemini_model or last.get("gemini_model")),
@@ -215,7 +240,7 @@ def main():
             clean_level=a.clean_level or cfg["clean_level"],
             transcribe=a.transcribe, summarize=a.summarize,
             gemini_model=a.gemini_model or _GEMINI_MODEL, engine=a.engine,
-            translate=a.translate, auto_yes=a.yes,
+            translate=a.translate, bilingual=a.bilingual, auto_yes=a.yes,
             link_timestamps=bool(a.link_timestamps), srt=bool(a.srt), epub=a.epub,
-            dedupe=not a.no_dedupe, obsidian=a.obsidian,
+            dedupe=not a.no_dedupe, obsidian=a.obsidian, jsonl=a.jsonl,
             cookies_from_browser=a.cookies_from_browser))

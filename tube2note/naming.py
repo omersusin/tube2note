@@ -2,6 +2,17 @@
 import re
 
 
+def _say(*a, **k):
+    """Pipe-safe print: stderr when stdout is a data pipe."""
+    import sys
+
+    from . import ui as _u
+    if _u.PIPE:
+        print(*a, file=sys.stderr, flush=True)
+    else:
+        print(*a, **k)
+
+
 def slug(s, fallback="tube2note"):
     s = re.sub(r"[^a-z0-9]+", "-", sanitize_filename(s, "").lower()).strip("-")
     return (s[:60] or fallback) + ".md"
@@ -37,7 +48,7 @@ def render_template(tmpl, fields):
     new = unknown - _WARNED_FIELDS
     if new:
         _WARNED_FIELDS.update(new)
-        print(f"warning: unknown template field(s): {', '.join(sorted(new))} (left empty)", flush=True)
+        _say(f"warning: unknown template field(s): {', '.join(sorted(new))} (left empty)")
     rel = re.sub(r"\{(\w+)\}", lambda m: str(fields.get(m.group(1), "")), tmpl or "")
     segs = [sanitize_filename(p) for p in rel.split("/") if p.strip() and p.strip() != "."]
     rel = "/".join(segs)

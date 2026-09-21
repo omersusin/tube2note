@@ -6,6 +6,18 @@ import time
 
 from yt_dlp import YoutubeDL
 
+
+def _say(*a, **k):
+    """Pipe-safe print: stderr when stdout is a data pipe."""
+    import sys
+
+    from . import ui as _u
+    if _u.PIPE:
+        print(*a, file=sys.stderr, flush=True)
+    else:
+        print(*a, **k)
+
+
 AUDIO_MIMES = {"mp3": "audio/mp3", "wav": "audio/wav", "aac": "audio/aac",
                "ogg": "audio/ogg", "flac": "audio/flac", "m4a": "audio/mp4",
                "webm": "audio/webm"}
@@ -56,11 +68,8 @@ def _gemini_request(key, payload, model=_GEMINI_MODEL, retries=2):
             break
         except urllib.error.HTTPError as e:
             if e.code in (429, 500, 502, 503, 504) and attempt < retries:
-                try:
-                    wait = int(e.headers.get("Retry-After", ""))
-                except ValueError:
-                    wait = 4 * 2 ** attempt
-                time.sleep(min(wait, 60))
+                from .throttle import _retry_after_hint
+                time.sleep(_retry_after_hint(e, 4 * 2 ** attempt, cap=60))
                 continue
             detail = e.read()[:200].decode("utf-8", "replace")
             raise RuntimeError(f"Gemini API error: HTTP {e.code} {detail}") from None
@@ -130,9 +139,27 @@ def _translate_chunks(text, target, model, budget=4000):
         out.append("\n\n".join(lines.get(i, c[i]) for i in range(len(c))))
         missing = [i for i in range(len(c)) if i not in lines]
         if missing:
-            print(f"  ! translate: {len(missing)} paragraph(s) lost [N] markers, kept source text",
+            _say(f"  ! translate: {len(missing)} paragraph(s) lost [N] markers, kept source text",
                   flush=True)
     return "\n\n".join(out)
+
+
+def _zip_bilingual(src_text, trans_text):
+    """Interleave source + translation line by line (translation quoted).
+    Cleaned transcripts are one sentence per line, so lines (not blank-line
+    paras) are the alignment unit. Headings (### ) stay structural, unquoted.
+    Returns (ok, body); ok=False -> caller emits two sections. Pure."""
+    src = [ln for ln in (src_text or "").splitlines() if ln.strip()]
+    tra = [ln for ln in (trans_text or "").splitlines() if ln.strip()]
+    if not src or not tra or len(src) != len(tra):
+        return False, ""
+    parts = []
+    for x, t in zip(src, tra):
+        if x.lstrip().startswith("### ") or t.lstrip().startswith("### "):
+            parts.append(x.strip() + "\n" + t.strip())  # headings stay structural
+        else:
+            parts.append(x.strip() + "\n> " + t.strip())
+    return True, "\n".join(parts)
 
 
 def _split_words(text, budget=20000):

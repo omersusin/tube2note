@@ -2,8 +2,10 @@
 import datetime
 import glob
 import hashlib
+import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -15,7 +17,13 @@ from .commands import ensure_extra
 from .config import _save_last
 from .export_srt import segs_to_srt
 from .links import linkify
-from .llm import _GEMINI_MODEL, _gemini_summarize, _translate_chunks, _try_transcribe
+from .llm import (
+    _GEMINI_MODEL,
+    _gemini_summarize,
+    _translate_chunks,
+    _try_transcribe,
+    _zip_bilingual,
+)
 from .naming import DEFAULT_TEMPLATES, render_template
 from .output import (
     _collection_override,
@@ -29,7 +37,7 @@ from .output import (
 from .pdf import md_to_pdf
 from .source import _get_vtt, _parse_since, expand, pick_sub
 from .store import VID_RE, Store
-from .throttle import Bucket, _countdown, _is_throttle
+from .throttle import Bucket, _countdown, _is_throttle, _retry_after_hint
 from .ui import dash_end, dash_update, dim, green, log, panel, red, set_verbose
 from .vtt import _join_paras, vtt_segments
 from .whisper import _local_transcribe
@@ -52,7 +60,7 @@ def _exit_code(result):
 def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                 clean_level="full", transcribe=False, tmpdir=None, summarize=False,
                 gemini_model=_GEMINI_MODEL,
-                engine="api", translate=None, proxy=None, cookiefile=None):
+                engine="api", translate=None, bilingual=None, proxy=None, cookiefile=None):
     """One video, network only, never raises (except disk-full).
     Returns dict with stage: extract|subs|fetch|ok."""
     res = {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
@@ -88,12 +96,14 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                                 res["summary"] = _gemini_summarize(ttext, res["lg"], gemini_model)
                             except Exception as e:
                                 res["summary_error"] = str(e) or type(e).__name__
-                        if translate and len(ttext.split()) > 20:
+                        tgt = bilingual or translate
+                        if tgt and len(ttext.split()) > 20:
                             try:
-                                res["translation"] = _translate_chunks(ttext, translate,
+                                res["translation"] = _translate_chunks(ttext, tgt,
                                                                        gemini_model)
                             except Exception as e:
                                 res["translation_error"] = str(e) or type(e).__name__
+                        res["bilingual"] = bool(bilingual)
                         return res
                     res["error"] = f"no subtitles ({note})"
                 else:
@@ -119,12 +129,14 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                             res["summary"] = _gemini_summarize(res["text"], lg, gemini_model)
                         except Exception as e:
                             res["summary_error"] = str(e) or type(e).__name__
-                    if translate and len(res["text"].split()) > 20:
+                    tgt = bilingual or translate
+                    if tgt and len(res["text"].split()) > 20:
                         try:
-                            res["translation"] = _translate_chunks(res["text"], translate,
+                            res["translation"] = _translate_chunks(res["text"], tgt,
                                                                   gemini_model)
                         except Exception as e:
                             res["translation_error"] = str(e) or type(e).__name__
+                    res["bilingual"] = bool(bilingual)
                     res["cached"] = cached
                     res["stage"] = "ok"
                     return res
@@ -134,7 +146,7 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                         raise
                     if not _is_throttle(e):
                         break
-                    time.sleep(60)
+                    time.sleep(_retry_after_hint(e, 60))
             res["error"] = f"subtitle download failed: {last}"
             res["throttled"] = _is_throttle(last)
             res["stage"] = "fetch"
@@ -149,7 +161,7 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
 
 def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
             clean_level="full", transcribe=False, tmpdir=None, summarize=False,
-            gemini_model=_GEMINI_MODEL, engine="api", translate=None,
+            gemini_model=_GEMINI_MODEL, engine="api", translate=None, bilingual=None,
             proxy=None, cookiefile=None):
     """Yield (i, v, res) in submission order; purely serial when workers<=1.
     Parallel submits in small batches so a cooldown stops new work quickly."""
@@ -157,7 +169,7 @@ def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
         for i, v in work:
             yield i, v, _fetch_unit(ydl_opts, v, langs, ts, None, fetch_gap, clean,
                                     clean_level, transcribe, tmpdir, summarize, gemini_model,
-                                    engine, translate, proxy, cookiefile)
+                                    engine, translate, bilingual, proxy, cookiefile)
         return
     with ThreadPoolExecutor(max_workers=workers) as ex:
         it = iter(work)
@@ -167,7 +179,8 @@ def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
                 return
             futs = [(i, v, ex.submit(_fetch_unit, ydl_opts, v, langs, ts, bucket, fetch_gap,
                                      clean, clean_level, transcribe, tmpdir, summarize,
-                                     gemini_model, engine, translate, proxy, cookiefile)) for i, v in batch]
+                                     gemini_model, engine, translate, bilingual, proxy,
+                                     cookiefile)) for i, v in batch]
             for i, v, fu in futs:
                 try:
                     yield i, v, fu.result()
@@ -186,9 +199,22 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             verbose=False, layout="single", template="", pdf=False,
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
             workers=1, clean=True, clean_level="full", transcribe=False, summarize=False,
-            gemini_model=_GEMINI_MODEL, engine="api", translate=None, auto_yes=False,
+            gemini_model=_GEMINI_MODEL, engine="api", translate=None, bilingual=None, auto_yes=False,
             link_timestamps=False, srt=False, epub=False, dedupe=True, obsidian=False,
-            cookies_from_browser=None):
+            cookies_from_browser=None, jsonl=False):
+    to_stdout = (out == "-")
+    _say = (lambda *a, **k: print(*a, **{**k, "file": sys.stderr, "flush": True})) \
+        if to_stdout else (lambda *a, **k: print(*a, **k))
+    if to_stdout:  # pipe mode: data on stdout, everything else on stderr, no files/db
+        from .ui import set_pipe
+        set_pipe(True)
+        set_verbose(False)
+        verbose = False
+        layout = "single"
+        try:
+            sys.stdout.reconfigure(errors="replace")
+        except Exception:
+            pass
     if videos is None:
         videos = None
         if since and len(urls) == 1:  # fast path: channel RSS avoids the full listing
@@ -197,29 +223,36 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 videos = rss_videos(urls[0], _parse_since(since), max_n,
                                     cookies_from_browser=cookies_from_browser)
                 if videos is not None:
-                    print(f"list from RSS ({len(videos)} videos since {since})", flush=True)
+                    _say(f"list from RSS ({len(videos)} videos since {since})", flush=True)
             except Exception:
                 videos = None
         if videos is None:
             videos, _ = expand(urls, max_n, since, cookies_from_browser=cookies_from_browser)
-    if outdir and outdir != ".":
+    if outdir and outdir != "." and not to_stdout:
         outdir = os.path.expanduser(outdir)
         os.makedirs(outdir, exist_ok=True)
         out = os.path.join(outdir, out)
-    root = os.path.dirname(os.path.abspath(out))
-    coll = _collection_override(root)
-    if coll.get("layout") in ("single", "videos", "tree"):
-        layout = coll["layout"]
-    if isinstance(coll.get("lang"), str) and coll["lang"].strip():
-        lang_str = coll["lang"]
-    if isinstance(coll.get("timestamps"), bool):
-        ts = coll["timestamps"]
+    root = os.path.dirname(os.path.abspath(out)) if not to_stdout else ""
+    coll = {}
+    if not to_stdout:
+        coll = _collection_override(root)
+        if coll.get("layout") in ("single", "videos", "tree"):
+            layout = coll["layout"]
+        if isinstance(coll.get("lang"), str) and coll["lang"].strip():
+            lang_str = coll["lang"]
+        if isinstance(coll.get("timestamps"), bool):
+            ts = coll["timestamps"]
+        if coll.get("chunk") is not None:
+            try:
+                chunk = max(0, int(coll["chunk"]))
+            except (ValueError, TypeError):
+                pass
+        if coll.get("chunk_cooldown_min") is not None:  # minutes, like the TUI prompt
+            try:
+                chunk_cooldown = max(0, int(coll["chunk_cooldown_min"])) * 60
+            except (ValueError, TypeError):
+                pass
     ts = ts or link_timestamps  # links need markers; never silently produce unlinkable text
-    if coll.get("chunk") is not None:
-        try:
-            chunk = max(0, int(coll["chunk"]))
-        except (ValueError, TypeError):
-            pass
     if coll.get("chunk_cooldown_min") is not None:  # minutes, like the TUI prompt
         try:
             chunk_cooldown = max(0, int(coll["chunk_cooldown_min"])) * 60
@@ -228,47 +261,68 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     langs = [s.strip() for s in lang_str.split(",") if s.strip()]
     total = len(videos)
     if transcribe and not os.environ.get("GEMINI_API_KEY", "") and engine != "local":
-        print("transcribe needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
+        _say("transcribe needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
         return {"ok": 0, "skipped": 0, "total": total}
     if transcribe and engine == "local" and not ensure_extra("whisper", auto_yes):
-        print("local transcription unavailable — stopping before any work.")
+        _say("local transcription unavailable — stopping before any work.")
         return {"ok": 0, "skipped": 0, "total": total}
     if summarize and not os.environ.get("GEMINI_API_KEY", ""):
-        print("summarize needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
+        _say("summarize needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
         return {"ok": 0, "skipped": 0, "total": total}
-    if (transcribe or summarize or translate) and os.environ.get("GEMINI_API_KEY", ""):
-        print("notice: transcripts/summaries will be sent to the Google Gemini API.", flush=True)
-    _save_last(urls=urls, out=os.path.basename(out),
-               outdir=os.path.dirname(os.path.abspath(out)) or ".", lang=lang_str,
-               max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown, layout=layout,
-               template=template, ts=ts, split_words=split_words, sleep=sleep,
-               since=since, proxy=proxy, cookiefile=cookiefile, profile=profile,
-               translate=translate, clean=clean, clean_level=clean_level,
-               transcribe=transcribe, summarize=summarize, gemini_model=gemini_model,
-                engine=engine, fetch_gap=fetch_gap, workers=workers, pdf=pdf,
+    if (transcribe or summarize or translate or bilingual) and os.environ.get("GEMINI_API_KEY", ""):
+        _say("notice: transcripts/summaries will be sent to the Google Gemini API.", flush=True)
+    if not to_stdout:  # a stdout job has no resumable artifact; saving out="-" would poison --resume-last
+        _save_last(urls=urls, out=os.path.basename(out),
+                   outdir=os.path.dirname(os.path.abspath(out)) or ".", lang=lang_str,
+                   max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown, layout=layout,
+                   template=template, ts=ts, split_words=split_words, sleep=sleep,
+                   since=since, proxy=proxy, cookiefile=cookiefile, profile=profile,
+                   translate=translate, clean=clean, clean_level=clean_level,
+                   transcribe=transcribe, summarize=summarize, gemini_model=gemini_model,
+                    engine=engine, fetch_gap=fetch_gap, workers=workers, pdf=pdf,
                 link_timestamps=link_timestamps, srt=srt, epub=epub, dedupe=dedupe,
-                obsidian=obsidian, cookies_from_browser=cookies_from_browser)
-    print(f"{total} videos found", flush=True)
+                obsidian=obsidian, cookies_from_browser=cookies_from_browser, jsonl=jsonl,
+                bilingual=bilingual)
+    _say(f"{total} videos found", flush=True)
     if not videos:
         return {"ok": 0, "skipped": 0, "total": 0}
     done_log, skip_log = out + ".done", out + ".skip"
-    store = Store(out + ".db")
-    if fresh:
-        try:
-            store.cx.execute("DELETE FROM videos")
-            store.cx.commit()
-        except Exception:
-            pass
-    elif store.import_sidecars(done_log, skip_log):
-        print("migrated legacy .done/.skip into resume database", flush=True)
-    done = set() if fresh else store.done_ids()
-    if done:
-        print(f"resuming: {len(done)} videos already done", flush=True)
-    fresh_start = fresh or not os.path.exists(out)
+    store = None
+    if not to_stdout:
+        store = Store(out + ".db")
+        if fresh:
+            try:
+                store.cx.execute("DELETE FROM videos")
+                store.cx.commit()
+            except Exception:
+                pass
+        elif store.import_sidecars(done_log, skip_log):
+            _say("migrated legacy .done/.skip into resume database", flush=True)
+        done = set() if fresh else store.done_ids()
+        if done:
+            _say(f"resuming: {len(done)} videos already done", flush=True)
+    else:
+        done = set()
+    fresh_start = fresh or (not to_stdout and not os.path.exists(out))
     mode = "w" if fresh_start else "a"
     fout = None
+    jfh = None
     try:
-        fout = open(out, mode, encoding="utf-8")
+        if to_stdout:
+            fout = sys.stdout  # never closed (see finally)
+        else:
+            fout = open(out, mode, encoding="utf-8")
+        if jsonl:
+            jpath = out + ".jsonl"
+            if fresh_start:
+                try:
+                    os.remove(jpath)
+                except OSError:
+                    pass
+            elif done and not os.path.exists(jpath):
+                _say("warning: .jsonl missing but videos already done — rows incomplete, use --fresh",
+                      file=sys.stderr, flush=True)
+            jfh = open(jpath, "a", encoding="utf-8")
         if fresh_start:
             done = set()
         if mode == "w":
@@ -277,9 +331,10 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                        f"- Languages: {','.join(langs)}\n\nFeed this file to NotebookLM as a source.\n\n---\n\n")
         todo = max(0, total - len(done))
         completed = set(done)
-        words_by_id = {} if fresh_start else store.words_map()
-        print(f"target: {todo} videos (chunk: {chunk}, chunk break: {chunk_cooldown // 60} min, layout: {layout})", flush=True)
+        words_by_id = {} if (fresh_start or to_stdout) else store.words_map()
+        _say(f"target: {todo} videos (chunk: {chunk}, chunk break: {chunk_cooldown // 60} min, layout: {layout})", flush=True)
         ok, skip, words, consec, since_break, status = 0, [], 0, 0, 0, ""
+        seen_hashes = {}  # pipe-mode in-process dedupe (no db there)
         used_paths = set()
         set_verbose(verbose)
         t0 = time.time()
@@ -297,11 +352,11 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         work = [(i, v) for i, v in enumerate(videos, 1) if v["id"] not in done]
         tmpdir = tempfile.mkdtemp(prefix="tube2note-")
         if workers > 1:
-            print(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
+            _say(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
         with YoutubeDL(ydl_opts):
             for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap,
                                     clean, clean_level, transcribe, tmpdir, summarize, gemini_model,
-                                    engine, translate, proxy, cookiefile):
+                                    engine, translate, bilingual, proxy, cookiefile):
                 if chunk > 0 and since_break >= chunk and (ok + len(skip)) < todo:
                     if verbose:
                         log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
@@ -324,7 +379,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     if consec >= 5:
                         if verbose:
                             log("  ! 5 throttles in a row -> long cooldown")
-                        _countdown(throttle_cooldown, "throttle cooldown", lambda left: dash_update(
+                        _countdown(_retry_after_hint(res.get("error") or "", throttle_cooldown),
+                                   "throttle cooldown", lambda left: dash_update(
                             ok + len(skip), todo, v["title"], ok, len(skip), words, t0,
                             status=f"throttle cooldown {left // 60:02d}:{left % 60:02d} left"))
                         consec, status = 0, ""
@@ -339,16 +395,25 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 text = res["text"]
                 if dedupe and text:
                     sha = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-                    owner = store.hash_owner(sha)
+                    if store is not None:
+                        owner = store.hash_owner(sha)
+                    else:
+                        owner = seen_hashes.get(sha)
                     if owner and owner != v["id"]:
                         if verbose:
                             log(f"  ! duplicate transcript of {owner}, skipped")
                         skip.append((title, wurl, f"duplicate transcript of {owner}"))
                         consec, status = 0, "duplicate"
                         continue
-                    store.note_hash(sha, v["id"])
+                    if store is not None:
+                        store.note_hash(sha, v["id"])
+                    else:
+                        seen_hashes[sha] = v["id"]
                 if link_timestamps:
+                    plain = text  # pre-link snapshot for JSONL
                     text = linkify(text, v["id"])
+                else:
+                    plain = text
                 if res.get("cached") and verbose:
                     log("  (from cache)")
                 if text is None:
@@ -360,7 +425,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     if consec >= 5:
                         if verbose:
                             log("  ! 5 throttles in a row -> long cooldown")
-                        _countdown(throttle_cooldown, "throttle cooldown", lambda left: dash_update(
+                        _countdown(_retry_after_hint(res.get("error") or "", throttle_cooldown),
+                                   "throttle cooldown", lambda left: dash_update(
                             ok + len(skip), todo, title, ok, len(skip), words, t0,
                             status=f"throttle cooldown {left // 60:02d}:{left % 60:02d} left"))
                         consec, status = 0, ""
@@ -375,7 +441,16 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     log(f"  ! summary failed: {res['summary_error']}")
                 transblock = ""
                 if res.get("translation"):
-                    transblock = f"\n### Translation ({translate})\n{res['translation']}\n"
+                    if res.get("bilingual"):
+                        _bok, _body = _zip_bilingual(text, res["translation"])
+                        if _bok:
+                            transblock = f"\n### Bilingual ({bilingual})\n{_body}\n"
+                        else:
+                            if verbose:
+                                log("  ! bilingual paragraph counts differ, falling back to sections")
+                            transblock = f"\n### Translation ({bilingual})\n{res['translation']}\n"
+                    else:
+                        transblock = f"\n### Translation ({translate})\n{res['translation']}\n"
                 elif res.get("translation_error") and verbose:
                     log(f"  ! translation failed: {res['translation_error']}")
                 try:
@@ -384,7 +459,14 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                                f"{' (transcribed)' if res.get('trans') else (' (auto)' if auto else '')}\n"
                                f"{sumblock}{transblock}\n{text}\n\n---\n\n")
                     fout.flush()
-                    store.mark_done(v["id"], title, wurl, len(text.split()))
+                    if store is not None:
+                        store.mark_done(v["id"], title, wurl, len(text.split()))
+                    if jfh is not None:
+                        row = {"video_id": v["id"], "title": title, "url": wurl,
+                               "channel": v.get("channel") or res.get("channel") or "",
+                               "lang": lg, "text": plain, "words": len(plain.split())}
+                        jfh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                        jfh.flush()
                     ok += 1
                     nwords = len(text.split())
                     words += nwords
@@ -411,9 +493,14 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                             if res.get("summary"):
                                 vf.write(f"\n### Summary\n{res['summary']}\n")
                             if res.get("translation"):
-                                vf.write(f"\n### Translation ({translate})\n{res['translation']}\n")
+                                if res.get("bilingual"):
+                                    _bok2, _body2 = _zip_bilingual(text, res["translation"])
+                                    vf.write(f"\n### Bilingual ({bilingual})\n"
+                                             f"{_body2 if _bok2 else res['translation']}\n")
+                                else:
+                                    vf.write(f"\n### Translation ({translate})\n{res['translation']}\n")
                             vf.write(f"\n{text}\n")
-                    if srt and res.get("segs"):
+                    if srt and not to_stdout and res.get("segs"):
                         srt_text = _srt_text(res["segs"])
                         if layout != "single":
                             srt_path = os.path.splitext(vp)[0] + ".srt"
@@ -425,30 +512,44 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     elif srt and verbose:
                         log("  (no .srt: transcribed videos carry no timings)")
                 except OSError as e:
-                    print(red(f"  ! FATAL disk/IO error, stopping: {e}"))
+                    if to_stdout and isinstance(e, BrokenPipeError):
+                        os._exit(0)  # `| head` is success, not failure
+                    _say(red(f"  ! FATAL disk/IO error, stopping: {e}"))
                     raise SystemExit(1)
                 dash_update(ok + len(skip), todo, v["title"], ok, len(skip), words, t0)
                 time.sleep(sleep)
         dash_update(todo, todo, "done", ok, len(skip), words, t0)
         dash_end()
         for t, u, s in skip:
-            vid = (VID_RE.search(u or "") or [None, u])[1]
-            store.mark_skip(vid or u, t, u, s)
-        fout.close()
+            if store is not None:
+                vid = (VID_RE.search(u or "") or [None, u])[1]
+                store.mark_skip(vid or u, t, u, s)
+        if not to_stdout:
+            fout.close()
         shutil.rmtree(tmpdir, ignore_errors=True)
     finally:  # Ctrl+C / SystemExit mid-run: never leak handles or temp audio
         try:
-            if fout is not None:
+            if fout is not None and fout is not sys.stdout:
                 fout.close()
+        except Exception:
+            pass
+        try:
+            if jfh is not None:
+                jfh.close()
         except Exception:
             pass
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
         except NameError:
             pass
+        from .ui import set_pipe as _set_pipe
+        _set_pipe(False)  # never leak pipe mode into in-process callers
+    if to_stdout:
+        _say(f"{ok}/{len(videos)} videos, {words} words (stdout)")
+        return {"ok": ok, "skipped": len(skip), "total": len(videos)}
     if layout != "single":
         _write_index(root, videos, completed, words_by_id, store.skip_reasons())
-        print(f"index: {os.path.join(root, 'INDEX.md')}", flush=True)
+        _say(f"index: {os.path.join(root, 'INDEX.md')}", flush=True)
     # reconcile skips: drop videos that completed since, so counts/tail stay honest
     for vid in list(completed):
         store.unskip(vid)
@@ -468,7 +569,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     for vid, title, url, reason in store.skips():
                         f.write(f"- [{title or '?'}]({url or ''}) — {reason}\n")
         dash_end()
-        print(panel("Done", [
+        _say(panel("Done", [
             f"{green(str(ndone))} videos -> {out} ({nskip} skipped)",
             f"~{words} words this run",
         ]))
@@ -477,31 +578,31 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             if total_words > split_words:
                 parts = split_output(out, split_words)
                 if len(parts) > 1:
-                    print(panel("Upload to NotebookLM", ["Add each part as a separate source:"]
+                    _say(panel("Upload to NotebookLM", ["Add each part as a separate source:"]
                                 + [f"  {j}. {p}" for j, p in enumerate(parts, 1)]))
                 else:
-                    print(f"Single file is enough ({total_words} words).")
+                    _say(f"Single file is enough ({total_words} words).")
             else:
-                print(f"No split needed ({total_words} words <= {split_words}).")
+                _say(f"No split needed ({total_words} words <= {split_words}).")
         else:
-            print("Upload to NotebookLM: add this file as a source.")
-            print(dim("Cap is 500,000 words/file — use --split-words if bigger."))
+            _say("Upload to NotebookLM: add this file as a source.")
+            _say(dim("Cap is 500,000 words/file — use --split-words if bigger."))
         if pdf:
             base, _ = os.path.splitext(out)
             for src in [out] + sorted(glob.glob(base + "_part*.md")):
                 try:
-                    print("PDF: " + md_to_pdf(src), flush=True)
+                    _say("PDF: " + md_to_pdf(src), flush=True)
                 except SystemExit as e:
-                    print(e)
+                    _say(e)
                     break
         if epub:
             from .epub import md_to_epub
             try:
-                print("EPUB: " + md_to_epub(out), flush=True)
+                _say("EPUB: " + md_to_epub(out), flush=True)
             except OSError as e:
-                print(f"! EPUB failed: {e}")
+                _say(f"! EPUB failed: {e}")
     else:
         dash_end()
-        print(f"Checkpoint: {ok} videos, {words} words -> {out} (total: {ndone}/{len(videos)})")
+        _say(f"Checkpoint: {ok} videos, {words} words -> {out} (total: {ndone}/{len(videos)})")
     store.close()
     return {"ok": ok, "skipped": nskip, "total": len(videos)}

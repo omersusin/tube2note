@@ -103,6 +103,7 @@ _dash_lines = 0  # lines currently drawn (0 = nothing on screen yet)
 
 
 _VERBOSE = False
+PIPE = False  # stdout is a data pipe (tube2note -o -): diagnostics go to stderr, dashboard off
 
 
 def set_verbose(on):
@@ -111,9 +112,17 @@ def set_verbose(on):
     _VERBOSE = bool(on)
 
 
+def set_pipe(on):
+    """Pipe mode: keep stdout clean for transcript data."""
+    global PIPE
+    PIPE = bool(on)
+
+
 def dash_update(done_n, todo_n, title, ok_n, skip_n, words, t0, status=""):
     """Redraw the single in-place dashboard (TTY) or plain lines (logs)."""
     global _dash_lines
+    if PIPE:
+        return
     if _VERBOSE:
         el = (time.time() - t0) / 60
         extra = f" · {status}" if status else ""
@@ -135,6 +144,9 @@ def dash_update(done_n, todo_n, title, ok_n, skip_n, words, t0, status=""):
 def log(msg):
     """Log line that cleanly breaks the live dashboard."""
     global _dash_lines
+    if PIPE:
+        print(msg, file=sys.stderr, flush=True)
+        return
     if _dash_lines and UI_ON:
         sys.stdout.write("\n")
         _dash_lines = 0

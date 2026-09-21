@@ -5,6 +5,17 @@ import time
 
 from .ui import UI_ON
 
+
+def _say(*a, **k):
+    """Pipe-safe print: stderr when stdout is a data pipe."""
+    import sys
+
+    from . import ui as _u
+    if _u.PIPE:
+        print(*a, file=sys.stderr, flush=True)
+    else:
+        print(*a, **k)
+
 VID_RE = r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})"
 
 
@@ -28,6 +39,38 @@ def _is_throttle(e):
     )):
         return True
     return re.search(r"\bip\b.{0,30}\bblock|\bblock.{0,30}\bip\b", low) is not None
+
+
+RETRY_AFTER_CAP = 7200  # 2h: a bogus header must never hang forever
+
+
+def _retry_after_hint(e, default, cap=RETRY_AFTER_CAP):
+    """Seconds to wait from a Retry-After hint, or default. Never raises.
+    Sources: e.headers / e.response.headers / str(e) `Retry-After: Ns`.
+    Non-numeric (HTTP-date, 'soon'), missing, <=0 -> default.
+    Absurd (>cap) -> cap. Never shortens below default."""
+    raw = None
+    for obj in (e, getattr(e, "response", None)):
+        h = getattr(obj, "headers", None)
+        if h:
+            try:
+                raw = h.get("Retry-After", h.get("retry-after", None)) if hasattr(h, "get") else None
+            except Exception:
+                raw = None
+            if raw is not None:
+                break
+    if raw is None:
+        m = re.search(r"retry-after\s*[:=]\s*([0-9]+)", str(e or ""), re.IGNORECASE)
+        raw = m.group(1) if m else None
+    if raw is None:
+        return default
+    try:
+        hint = int(str(raw).strip().split(",")[0].split()[0])
+    except (ValueError, TypeError, IndexError):
+        return default
+    if hint <= 0:
+        return default
+    return max(default, min(hint, cap))
 
 
 class Bucket:
@@ -56,9 +99,9 @@ def _countdown(secs, label, tick=None):
     if secs <= 0:
         return
     if not UI_ON:
-        print(f"{label}: sleeping ~{secs // 60} min...", flush=True)
+        _say(f"{label}: sleeping ~{secs // 60} min...")
         time.sleep(secs)
-        print(f"{label}: done.", flush=True)
+        _say(f"{label}: done.")
         return
     end = time.time() + max(1, secs)
     while True:

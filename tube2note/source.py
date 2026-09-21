@@ -11,6 +11,17 @@ import urllib.request
 from yt_dlp import YoutubeDL
 
 
+def _say(*a, **k):
+    """Pipe-safe print: stderr when stdout is a data pipe."""
+    import sys
+
+    from . import ui as _u
+    if _u.PIPE:
+        print(*a, file=sys.stderr, flush=True)
+    else:
+        print(*a, **k)
+
+
 def _parse_since(s):
     try:
         return datetime.datetime.strptime(s, "%Y-%m-%d").timestamp()
@@ -156,7 +167,7 @@ def rss_videos(url, since_ts, max_n=100, opener=None, cookies_from_browser=None)
 def expand(urls, max_n, since=None, fresh=False, cookies_from_browser=None):
     cached = None if fresh else _list_load(urls, max_n, since)
     if cached is not None:
-        print(f"list from cache ({len(cached[0])} videos)", flush=True)
+        _say(f"list from cache ({len(cached[0])} videos)")
         return cached
     ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 20}
     if cookies_from_browser:

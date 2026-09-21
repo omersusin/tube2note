@@ -1,4 +1,6 @@
 {"$schema": "../gen/schemas/desktop-schema.json", "identifier": "default",
  "windows": ["main"],
  "permissions": ["core:default",
-  {"identifier": "shell:allow-execute", "allow": [{"name": "binaries/tube2note-serve", "sidecar": true}]}]}
+  {"identifier": "shell:allow-execute",
+   "allow": [{"name": "binaries/tube2note-serve", "sidecar": true,
+              "args": ["serve", "--port", "--no-open"]}]}]}

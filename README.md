@@ -194,7 +194,7 @@ Yes, completely free and open source (MIT). Optional AI features use Google's fr
 
 For enthusiasts and developers. Not needed for normal use.
 
-**Command-line options** (languages, splitting, cleaning, speed, 40+ flags): run `tube2note --help`. Key ones: `--lang tr,en`, `--timestamps`, `--link-timestamps` (clickable minutes), `--srt` (subtitle files), `--split-words`, `--since YYYY-MM-DD`, `--resume-last`, `--redo VIDEO_ID`, `--fresh`, `--proxy`, `--cookies`, `--cookies-from-browser chrome`, `--workers 2`.
+**Command-line options** (languages, splitting, cleaning, speed, 40+ flags): run `tube2note --help`. Key ones: `--lang tr,en`, `--timestamps`, `--link-timestamps` (clickable minutes), `--srt` (subtitle files), `--split-words`, `--since YYYY-MM-DD`, `--resume-last`, `--redo VIDEO_ID`, `--fresh`, `--proxy`, `--cookies`, `--cookies-from-browser chrome`, `--workers 2`, `--jsonl` (JSON lines for scripts), `-o -` (print transcript to terminal instead of a file), `--bilingual tr` (two languages side by side), `watch --daemon` / `watch --stop` (background watching).
 
 **AI features** (need a free `GEMINI_API_KEY` from [aistudio.google.com](https://aistudio.google.com)): `--transcribe` (transcribe captionless video), `--summarize` (summary per video), `--translate tr`, `--gemini-model`.
 

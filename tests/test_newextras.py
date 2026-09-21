@@ -163,3 +163,77 @@ def test_watch_subs_file(home, monkeypatch):
     code = w.cmd_watch(["--subs", str(home / "subs.yaml"), "-d", str(home), "--sleep", "0"])
     assert code == 0
     assert [u for u, _ in seen] == [["http://a"], ["http://b"]]  # each sub collected to its own out
+
+
+def test_daemon_requires_interval(home, monkeypatch):
+    import tube2note.watch as w
+    monkeypatch.setattr(w.os, "fork", lambda: (_ for _ in ()).throw(AssertionError("forked!")))
+    import pytest
+    with pytest.raises(SystemExit) as e:
+        w.cmd_watch(["http://ch", "--daemon", "--interval", "0"])
+    assert e.value.code == 2
+
+
+def test_daemon_detach_sequence_mocked(home, monkeypatch, capsys):
+    import tube2note.ui as ui
+    import tube2note.watch as w
+    monkeypatch.setattr(ui, "UI_ON", True)  # prove detach resets it (auto-reverted)
+    calls = []
+    monkeypatch.setattr(w.os, "fork", lambda: calls.append("fork") or 0)
+    monkeypatch.setattr(w.os, "setsid", lambda: calls.append("setsid"))
+    monkeypatch.setattr(w.os, "dup2", lambda a, b: None)
+    monkeypatch.setattr(w.os, "umask", lambda m: None)
+    _real_open = open
+
+    def _fake_open(*a, **k):
+        mode = a[1] if len(a) > 1 else k.get("mode", "r")
+        if "w" in mode or "a" in mode or "+" in mode:
+            return _real_open("/dev/null", "a")
+        return _real_open(*a, **k)
+    monkeypatch.setattr("builtins.open", _fake_open)
+    monkeypatch.setattr(w.signal, "signal", lambda s, h: None)
+    monkeypatch.setattr(w, "_check", lambda *a, **k: 0)
+    sleeps = []
+    monkeypatch.setattr(w.time, "sleep", lambda s: sleeps.append(s) or (_ for _ in ()).throw(KeyboardInterrupt))
+    monkeypatch.setattr(w.os, "getpid", lambda: 4242)
+    assert w.cmd_watch(["http://ch", "-o", "w.md", "--daemon", "--interval", "5"]) == 0
+    assert calls.count("fork") == 2 and "setsid" in calls
+    assert ui.UI_ON is False
+    assert sleeps == [300.0]
+    import json
+    assert json.load(open(w._pid_path()))["pid"] == 4242
+
+
+def test_double_start_refused(home, monkeypatch, capsys):
+    import os as _os
+
+    import tube2note.watch as w
+    monkeypatch.setattr(w, "_pid_is_alive", lambda pid: True)
+    monkeypatch.setattr(w, "_is_ours", lambda pid: True)
+    import json
+    _os.makedirs(_os.path.dirname(w._pid_path()), exist_ok=True)
+    open(w._pid_path(), "w").write(json.dumps({"pid": 999}))
+    monkeypatch.setattr(w.os, "fork", lambda: (_ for _ in ()).throw(AssertionError("forked!")))
+    assert w.cmd_watch(["http://ch", "--daemon", "--interval", "5"]) == 1
+    assert "already running" in capsys.readouterr().out
+
+
+def test_stop_paths(home, monkeypatch, capsys):
+    import os as _os
+
+    import tube2note.watch as w
+    assert w.cmd_watch(["--stop"]) == 1  # no pidfile
+    assert "not running" in capsys.readouterr().out
+    import json
+    _os.makedirs(_os.path.dirname(w._pid_path()), exist_ok=True)
+    open(w._pid_path(), "w").write(json.dumps({"pid": 99999}))
+    monkeypatch.setattr(w, "_pid_is_alive", lambda pid: False)
+    assert w.cmd_watch(["--stop"]) == 1  # stale
+    assert not __import__("os").path.exists(w._pid_path())
+    open(w._pid_path(), "w").write(json.dumps({"pid": 99999}))
+    monkeypatch.setattr(w, "_pid_is_alive", lambda pid: True)
+    monkeypatch.setattr(w, "_is_ours", lambda pid: False)
+    killed = []
+    monkeypatch.setattr(w.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    assert w.cmd_watch(["--stop"]) == 1  # reuse: never kill
+    assert killed == [] and "NOT killed" in capsys.readouterr().out
