@@ -165,6 +165,7 @@ def tui():
         cl = input(f"Cleaning? [{'y' if cfg['clean'] else 'n'}] > ").strip().lower()
         cl = cfg["clean"] if cl == "" else cl in ("y", "yes")
         pdf = input("PDF too? [n] > ").strip().lower() in ("y", "yes")
+        ep = input("EPUB too? [n] > ").strip().lower() in ("y", "yes")
         tmp = input(f"Name template [{cfg['template'] or 'layout default'}] > ").strip()
         tmp = tmp or cfg["template"]
         wk = input("Workers [1] > ").strip() or "1"
@@ -184,7 +185,7 @@ def tui():
             continue
         try:
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
-                    layout=lay, template=tmp, pdf=pdf, since=since, profile=prof, workers=wk,
+                    layout=lay, template=tmp, pdf=pdf, epub=ep, since=since, profile=prof, workers=wk,
                     clean=cl, clean_level=cfg["clean_level"],
                     link_timestamps=lk, srt=sr,
                     transcribe=tr is not None, engine=tr or "api",

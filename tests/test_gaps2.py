@@ -174,7 +174,7 @@ def test_tui_link_srt_plumbing(home, monkeypatch):
         [{"id": "aaaaaaaaaaa", "title": "A", "url": urls[0]}], "H"))
     monkeypatch.setattr(t, "detect_langs", lambda videos: ("en", []))
     answers = iter(["https://www.youtube.com/watch?v=aaaaaaaaaaa", "", "", "", "", "",
-                    "", "", "n", "y", "y", "y", "n", "y", "tr", "", "n", "", "", "", "", "q"])
+                    "", "", "n", "y", "y", "y", "n", "y", "tr", "", "n", "n", "", "", "", "", "q"])
     monkeypatch.setattr("builtins.input", lambda *a: next(answers))
     got = {}
     monkeypatch.setattr(t, "run_job", lambda *a, **k: got.update(k) or {"ok": 1, "skipped": 0, "total": 1})
@@ -182,6 +182,7 @@ def test_tui_link_srt_plumbing(home, monkeypatch):
     assert got["link_timestamps"] is True and got["srt"] is True
     assert got["transcribe"] is True and got["engine"] == "api"
     assert got["summarize"] is True and got["translate"] == "tr"
+    assert got["epub"] is False
 
 
 def test_web_bool_flags_and_checkboxes():

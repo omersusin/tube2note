@@ -24,7 +24,10 @@ TOOLS = [
                          "summarize": {"type": "boolean", "description": "needs GEMINI_API_KEY"},
                          "translate": {"type": "string", "description": "target lang, needs GEMINI_API_KEY"},
                          "link_timestamps": {"type": "boolean", "description": "clickable timestamp links"},
-                         "srt": {"type": "boolean", "description": "write .srt sidecar per video"}},
+                         "srt": {"type": "boolean", "description": "write .srt sidecar per video"},
+                         "epub": {"type": "boolean", "description": "write EPUB next to the Markdown"},
+                         "obsidian": {"type": "boolean", "description": "Obsidian tags+aliases"},
+                         "cookies_from_browser": {"type": "string", "description": "e.g. chrome"}},
                      "required": ["url"]}},
     {"name": "status",
      "description": "Collection progress (done/skipped counts) for a folder.",
@@ -60,7 +63,9 @@ def _call(name, args):
                           summarize=bool(args.get("summarize")),
                           translate=args.get("translate"),
                           link_timestamps=bool(args.get("link_timestamps")),
-                          srt=bool(args.get("srt")))
+                          srt=bool(args.get("srt")), epub=bool(args.get("epub")),
+                          obsidian=bool(args.get("obsidian")),
+                          cookies_from_browser=args.get("cookies_from_browser"))
         tail = "\n".join(buf.getvalue().splitlines()[-5:])
         return _text(f"exit={_exit_code(res)}\n{tail}")
     if name == "status":

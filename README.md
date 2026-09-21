@@ -304,6 +304,7 @@ Tests run the whole pipeline (and the web UI) offline against a fake yt-dlp in `
 
 ## Changelog
 
+- **0.14.1** — wiring gaps: epub/obsidian/dedupe/cookies in MCP, EPUB checkbox in web UI, EPUB prompt in TUI.
 - **0.14.0** — `--cookies-from-browser` (no more cookies.txt exporting).
 - **0.13.0** — `--obsidian` notes (tags + aliases, Dataview-ready).
 - **0.12.0** — deferred batch: SQLite resume store (+legacy migration), EPUB export (stdlib), RSS fast-path for `--since`, transcript-hash dedupe.

@@ -118,6 +118,8 @@ def build_argv(p, base_dir, python=None):
         argv += ["--workers", str(workers)]
     if _bool(p.get("pdf")):
         argv.append("--pdf")
+    if _bool(p.get("epub")):
+        argv.append("--epub")
     if _bool(p.get("dry_run")):
         argv.append("--dry-run")
     if gemini_available():  # the key stays in the server's environment; the page never sees or sends it
@@ -585,6 +587,7 @@ pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:10px;m
 <label class="chk"><input type="checkbox" id="srt"> Write .srt sidecars</label>
 <label class="chk"><input type="checkbox" id="clean" checked> Clean transcripts</label>
 <label class="chk" id="pdfrow"><input type="checkbox" id="pdf"> Also write PDF</label>
+<label class="chk"><input type="checkbox" id="epub"> Also write EPUB</label>
 <details><summary>More options</summary>
 <div class="row">
 <div><label for="layout">Layout</label><select id="layout"><option>single</option><option>videos</option><option>tree</option></select></div>
@@ -617,7 +620,7 @@ pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:10px;m
 <script nonce="__NONCE__">
 const $=id=>document.getElementById(id);
 const FIELDS=["urls","name","lang","layout","max","since","split_words","workers","translate"];
-const BOOLS=["timestamps","link_timestamps","srt","clean","pdf","summarize","transcribe"];
+const BOOLS=["timestamps","link_timestamps","srt","clean","pdf","epub","summarize","transcribe"];
 let busy=false,timer=null,seeded=false;
 function save(){try{const o={};FIELDS.forEach(f=>o[f]=$(f).value);BOOLS.forEach(f=>o[f]=$(f).checked);localStorage.setItem("t2n",JSON.stringify(o))}catch(e){}}
 function load(){try{const o=JSON.parse(localStorage.getItem("t2n")||"null");if(!o)return false;FIELDS.forEach(f=>{if(o[f]!=null)$(f).value=o[f]});BOOLS.forEach(f=>{if(o[f]!=null)$(f).checked=o[f]});return true}catch(e){return false}}

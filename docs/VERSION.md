@@ -1,4 +1,7 @@
-[![version v0.14.0](https://img.shields.io/badge/version-v0.14.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.14.0)
+[![version v0.14.1](https://img.shields.io/badge/version-v0.14.1-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.14.1)
+
+## v0.14.0
+11eb12c 0.14.0: cookies-from-browser
 
 ## v0.13.0
 75d5795 0.13.0: obsidian notes
