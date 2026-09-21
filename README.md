@@ -1,54 +1,54 @@
-# tube2note — YouTube videolarını yazıya çevir
+# tube2note — Turn YouTube videos into text
 
 [![PyPI](https://img.shields.io/pypi/v/tube2note)](https://pypi.org/project/tube2note/)
 [![Site](https://img.shields.io/badge/site-tube2note.github.io-blue)](https://omersusin.github.io/tube2note/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-YouTube'daki bir kanalın, oynatma listesinin veya videoların **konuşmalarını yazıya döker** ve düzenli dosyalar hâlinde verir. Ders çalışmak, araştırma yapmak veya videoları NotebookLM gibi yapay zekâ araçlarına vermek için birebirdir.
+Turn a YouTube channel, playlist, or videos into **readable text files**. Study, research, or feed them to AI tools like NotebookLM.
 
-🌐 **Site:** https://omersusin.github.io/tube2note/ · 🐙 **Kaynak kod:** https://github.com/omersusin/tube2note
+🌐 **Site:** https://omersusin.github.io/tube2note/ · 🐙 **Source:** https://github.com/omersusin/tube2note
 
-> **Teknik bilgin yoksa korkma.** Aşağıdaki adımları sırayla uygula, 10 dakikada ilk dosyan elinde olur.
-
----
-
-## İçindekiler
-
-- [Bu program ne yapar?](#bu-program-ne-yapar)
-- [Kurulum: Android (telefon)](#kurulum-android-telefon)
-- [Kurulum: Bilgisayar (Windows / Mac / Linux)](#kurulum-bilgisayar-windows--mac--linux)
-- [İlk kullanım (adım adım)](#i̇lk-kullanım-adım-adım)
-- [Günlük kullanım örnekleri](#günlük-kullanım-örnekleri)
-- [Sık sorulan sorular](#sık-sorulan-sorular)
-- [Sorun çıkarsa](#sorun-çıkarsa)
-- [İleri düzey (opsiyonel)](#i̇leri-düzey-opsiyonel)
+> **No technical background needed.** Follow the steps in order — your first file will be ready in 10 minutes.
 
 ---
 
-## Bu program ne yapar?
+## Contents
 
-1. Bir YouTube bağlantısı verirsin (video, kanal veya liste).
-2. Program videolardaki konuşmaları indirir, temizler, tek bir okunabilir dosya yapar.
-3. Bu dosyayı **NotebookLM'e kaynak olarak verirsin** ve videolar hakkında sorular sorarsın.
-
-Örnek: 200 videoluk bir ders kanalını bir dosyaya çevirirsin, sonra "3. derste ne anlatıldı?" diye sorarsın.
-
-Teknik detaylar (geliştiriciler için): [MCP sunucusu](#i̇leri-düzey-opsiyonel), [Python API](#i̇leri-düzey-opsiyonel), [kaynak kod](https://github.com/omersusin/tube2note).
+- [What does it do?](#what-does-it-do)
+- [Install: Android (phone)](#install-android-phone)
+- [Install: Computer (Windows / Mac / Linux)](#install-computer-windows--mac--linux)
+- [First run (step by step)](#first-run-step-by-step)
+- [Everyday examples](#everyday-examples)
+- [FAQ](#faq)
+- [If something breaks](#if-something-breaks)
+- [Advanced (optional)](#advanced-optional)
 
 ---
 
-## Kurulum: Android (telefon)
+## What does it do?
 
-Telefonda çalışması için **Termux** adlı ücretsiz uygulamayı kullanıyoruz.
+1. You give it a YouTube link (video, channel, or playlist).
+2. It downloads what people say in the videos, cleans it up, and makes one readable file.
+3. You give that file to NotebookLM as a source and ask questions about the videos.
 
-### 1. Termux'u kur
+Example: convert a 200-video course channel into one file, then ask "what was covered in lesson 3?"
 
-- **F-Droid'den kur** (önerilir): [f-droid.org](https://f-droid.org) sitesinden F-Droid'i indir, sonra F-Droid içinden **Termux**'u kur.
-- Play Store'daki Termux eskidir, onu kullanma.
+For developers: [MCP server](#advanced-optional), [Python API](#advanced-optional), [source code](https://github.com/omersusin/tube2note).
 
-### 2. Gerekli şeyleri kur
+---
 
-Termux'u aç ve şu satırları **tek tek** yazıp her birinden sonra Enter'a bas:
+## Install: Android (phone)
+
+We use the free **Termux** app to run it on your phone.
+
+### 1. Install Termux
+
+- **Install from F-Droid** (recommended): download F-Droid from [f-droid.org](https://f-droid.org), then install **Termux** from inside F-Droid.
+- Don't use the Play Store version — it's outdated.
+
+### 2. Install the needed pieces
+
+Open Termux and type these lines **one by one**, pressing Enter after each:
 
 ```bash
 pkg update
@@ -56,160 +56,156 @@ pkg install python
 pip install tube2note
 ```
 
-Biraz bekle, kurulum bitsin.
+Wait for each to finish.
 
-### 3. Kontrol et
+### 3. Check it
 
 ```bash
 tube2note doctor
 ```
 
-Ekranda bir kontrol listesi çıkar. Her şey yolundaysa kurulum tamamdır. 🎉
+You'll see a checklist. If all is well, you're done. 🎉
 
-> **İpucu:** Uzun işler (büyük kanallar) gece çalışsın istersen, başlamadan önce `termux-wake-lock` yaz — telefon uykuya geçmez.
+> **Tip:** For long jobs (big channels) running overnight, type `termux-wake-lock` first so the phone doesn't fall asleep.
 
 ---
 
-## Kurulum: Bilgisayar (Windows / Mac / Linux)
+## Install: Computer (Windows / Mac / Linux)
 
-### 1. Python'u kur (yoksa)
+### 1. Install Python (if missing)
 
-- [python.org/downloads](https://www.python.org/downloads/) adresinden indir ve kur.
-- Kurarken **"Add python.exe to PATH"** kutusunu işaretle (Windows).
-- Kontrol: terminali/komut satırını aç, `python --version` yaz. Bir sürüm numarası görmelisin.
+- Download from [python.org/downloads](https://www.python.org/downloads/) and install.
+- On Windows, tick **"Add python.exe to PATH"** during setup.
+- Check: open a terminal (PowerShell/CMD on Windows, Terminal on Mac/Linux) and type `python --version`. You should see a version number.
 
-### 2. Programı kur
-
-Terminalde (Windows: PowerShell veya CMD, Mac/Linux: Terminal):
+### 2. Install the program
 
 ```bash
 pip install tube2note
 ```
 
-### 3. Kontrol et
+### 3. Check it
 
 ```bash
 tube2note doctor
 ```
 
-Her şey yolundaysa hazırsın. 🎉
+All good? You're ready. 🎉
 
 ---
 
-## İlk kullanım (adım adım)
+## First run (step by step)
 
-En kolayı **rehberli moddur**. Sadece şunu yaz:
+The easiest way is **guided mode**. Just type:
 
 ```bash
 tube2note
 ```
 
-Program sana sorular sorar, sen cevaplarsın:
+It asks questions, you answer:
 
-1. **Bağlantılar:** YouTube bağlantını yapıştır (birden fazla olabilir, araya boşluk koy).
-2. **Dosya adı:** Çıktı dosyasının adını seç (önerileni kabul etmek için Enter).
-3. **Klasör:** Dosyaların nereye kaydedileceğini seç.
-4. **Ayarlar tablosu:** Dil, video sayısı gibi ayarları onayla.
-5. **Başla:** Enter'a bas, program çalışsın.
+1. **Links:** paste your YouTube link (several allowed, separated by spaces).
+2. **File name:** pick the output file name (press Enter to accept the suggestion).
+3. **Folder:** pick where files are saved.
+4. **Settings table:** confirm language, video count, and other settings.
+5. **Start:** press Enter and let it work.
 
-İş bitince klasöründe `.md` uzantılı dosyan hazır. İlerleme çubuğunu ekranda görürsün.
+Your `.md` file lands in the folder when done. You can watch the progress bar.
 
-> **Yarıda kesilirse sorun değil.** İnternet giderse veya uygulamayı kapatırsan, aynı komutu tekrar çalıştır — kaldığı yerden devam eder.
-
----
-
-## Günlük kullanım örnekleri
-
-Komut yazmaya alışınca bunları kopyala-yapıştır kullanabilirsin:
-
-**Bir oynatma listesini indir:**
-```bash
-tube2note -o notlar.md "LİSTENİN_BAĞLANTISI"
-```
-
-**Bir kanalı klasörler hâlinde indir (her video ayrı dosya):**
-```bash
-tube2note -o kanal.md --layout tree -d ./notlarim "KANALIN_BAĞLANTISI"
-```
-
-**Önce ne çıkacağına bak (indirmeden tahmin):**
-```bash
-tube2note --dry-run "BAĞLANTI"
-```
-
-**Yeni videoları otomatik takip et:**
-```bash
-tube2note watch "KANALIN_BAĞLANTISI" -o kanal.md --interval 60
-```
-(İlk çalışta hepsini indirir, sonrakilerde sadece yeni videoları alır.)
-
-**İndirdiklerinin içinde ara:**
-```bash
-tube2note search "aradığın kelime" -d ./notlarim
-```
-
-**E-kitap okuyucun için EPUB yap:**
-```bash
-tube2note epub notlar.md
-```
-
-**Telefondan tek dokunuşla devam et:** `tube2note widget` yaz (Termux:Widget uygulaması gerekir).
+> **Interrupted? No problem.** If the internet drops or you close the app, run the same command again — it resumes where it stopped.
 
 ---
 
-## Sık sorulan sorular
+## Everyday examples
 
-**NotebookLM'e nasıl veririm?**
-NotebookLM'i aç → "Kaynak ekle" → bilgisayarından `.md` dosyasını yükle. Tek dosyada 500.000 kelime sınırı var; dosyan büyükse programı `--split-words 400000` seçeneğiyle çalıştır, parçalara böler.
+Once comfortable, copy-paste these:
 
-**Altyazısı olmayan video ne olur?**
-Atlanır ve `## Skipped` (Atlananlar) listesine yazılır. İstersen yapay zekâyla seslendirme yaptırabilirsin (İleri düzey bölümüne bak).
+**Download a playlist:**
+```bash
+tube2note -o notes.md "PASTE_PLAYLIST_LINK"
+```
 
-**Çok yavaş / durdu, ne yapayım?**
-YouTube bazen hızı kısar. Program zaten otomatik yavaşlar ve bekler. Hiç ilerlemiyorsa kapat, **1 saat bekle**, tekrar çalıştır — kaldığı yerden devam eder.
+**Download a channel, one file per video:**
+```bash
+tube2note -o channel.md --layout tree -d ./mynotes "PASTE_CHANNEL_LINK"
+```
 
-**Bilgisayarım/telefonum kapandı, baştan mı?**
-Hayır. Aynı komutu tekrar yaz, kaldığı yerden devam eder.
+**Preview first (download nothing):**
+```bash
+tube2note --dry-run "PASTE_LINK"
+```
 
-**İnternetteki siteden kullanabilir miyim?**
-Sitedeki form, ayrıca kurulan bir sunucu gerektirir. En kolayı yukarıdaki kurulumu yapmaktır.
+**Auto-follow new videos:**
+```bash
+tube2note watch "PASTE_CHANNEL_LINK" -o channel.md --interval 60
+```
+(First run downloads everything, later runs only fetch new videos.)
 
-**Bu ücretsiz mi?**
-Evet, tamamen ücretsiz ve açık kaynak (MIT). İsteğe bağlı yapay zekâ özellikleri Google'ın ücretsiz anahtarını kullanır.
+**Search inside your downloads:**
+```bash
+tube2note search "your keyword" -d ./mynotes
+```
+
+**Make an EPUB for your e-reader:**
+```bash
+tube2note epub notes.md
+```
+
+**One-tap resume on your phone:** type `tube2note widget` (needs the Termux:Widget app).
 
 ---
 
-## Sorun çıkarsa
+## FAQ
 
-| Sorun | Çözüm |
+**How do I give it to NotebookLM?**
+Open NotebookLM → "Add source" → upload the `.md` file from your device. One file caps at 500,000 words; for bigger collections run with `--split-words 400000` to auto-split.
+
+**What about videos without subtitles?**
+They're skipped and listed under `## Skipped`. Optionally, AI transcription is available (see Advanced).
+
+**It's slow / stuck — what now?**
+YouTube sometimes throttles downloads. The program already slows down automatically. If nothing moves: stop it, **wait ~1 hour**, run again — it resumes.
+
+**My device turned off — start over?**
+No. Run the same command again, it continues.
+
+**Can I use it on the website?**
+The site form needs a separately hosted backend. Easiest is the install above.
+
+**Is it free?**
+Yes, completely free and open source (MIT). Optional AI features use Google's free key.
+
+---
+
+## If something breaks
+
+| Problem | Fix |
 |---|---|
-| `tube2note: command not found` | Kurulum yarım kalmış. Kurulum adımlarını baştan yap. |
-| Saatlerce bekliyor, ilerlemiyor | Kapat, 1 saat bekle, tekrar çalıştır (YouTube hız kısmıştır). |
-| `No subtitles` (altyazı yok) | O videoda altyazı yoktur, atlanır. Hepsi böyleyse `--transcribe` seçeneğine bak (İleri düzey). |
-| Türkçe karakterler bozuk (`?` görünüyor) | `tube2note doctor` yaz, yazı tipi (font) satırına bak. |
-| Yerim doldu | Telefon/bilgisayarında yer aç, tekrar çalıştır. Yarım dosyalar bozulmaz. |
-| Hâlâ olmuyor | [Sorun bildir](https://github.com/omersusin/tube2note/issues) sayfasında anlat (Türkçe olur). |
+| `tube2note: command not found` | Install didn't finish. Redo the install steps. |
+| Stuck for hours, no progress | Stop, wait 1 hour, run again (YouTube throttled you). |
+| `No subtitles` | That video has no captions; it's skipped. If ALL fail, see `--transcribe` (Advanced). |
+| Broken Turkish characters (`?` showing) | Run `tube2note doctor`, check the font line. |
+| Disk full | Free up space and re-run. Half-written files are safe. |
+| Still stuck | [Open an issue](https://github.com/omersusin/tube2note/issues) and describe it. |
 
 ---
 
-## İleri düzey (opsiyonel)
+## Advanced (optional)
 
-Burası meraklılar ve geliştiriciler içindir. Normal kullanım için gerekmez.
+For enthusiasts and developers. Not needed for normal use.
 
-**Komut satırı seçenekleri** (diller, bölme, temizlik ayarı, hız ayarı ve 40+ bayrak): `tube2note --help` yazarak tamamını görebilirsin. Önemliler: `--lang tr,en`, `--timestamps` (zaman damgası), `--link-timestamps` (tıklanabilir dakikalar), `--srt` (altyazı dosyası), `--split-words`, `--since YYYY-AA-GG`, `--resume-last`, `--redo VIDEO_ID, `--fresh`, `--proxy`, `--cookies`, `--cookies-from-browser chrome`, `--workers 2`.
+**Command-line options** (languages, splitting, cleaning, speed, 40+ flags): run `tube2note --help`. Key ones: `--lang tr,en`, `--timestamps`, `--link-timestamps` (clickable minutes), `--srt` (subtitle files), `--split-words`, `--since YYYY-MM-DD`, `--resume-last`, `--redo VIDEO_ID`, `--fresh`, `--proxy`, `--cookies`, `--cookies-from-browser chrome`, `--workers 2`.
 
-**Yapay zekâ özellikleri** (ücretsiz `GEMINI_API_KEY` gerekir, [aistudio.google.com](https://aistudio.google.com)'dan alınır): `--transcribe` (altyazısız videoyu sese çevirir), `--summarize` (her videoya özet), `--translate tr` (çeviri), `--gemini-model` (model seçimi).
+**AI features** (need a free `GEMINI_API_KEY` from [aistudio.google.com](https://aistudio.google.com)): `--transcribe` (transcribe captionless video), `--summarize` (summary per video), `--translate tr`, `--gemini-model`.
 
-**İnternet tarayıcısından kullanma:** `tube2note serve` yaz — telefonda/bilgisayarda bir sayfa açılır, oradan yönetirsin.
+**Use from a browser page:** run `tube2note serve` — a page opens on your device to manage jobs.
 
-**Obsidian kullanıyorsan:** `--obsidian --layout videos` ile notların etiket + takma ad içerir.
+**Obsidian users:** `--obsidian --layout videos` adds tags + aliases to notes.
 
-**E-kitap:** `--epub` bayrağı veya `tube2note epub dosya.md`.
+**Automation:** `tube2note status folder --json`, exit codes (0 = ok, 1 = partial, 2 = fatal), `YT2MD_*` env vars, profiles in `~/.config/yt2md/config.json`.
 
-**Otomasyon:** `tube2note status klasör --json`, çıkış kodları (0 = tamam, 1 = kısmi, 2 = hata), `YT2MD_*` ortam değişkenleri, `~/.config/yt2md/config.json` profilleri.
+**Developers:** `import tube2note.api` (collect/list/status), `tube2note mcp` (Claude/AI assistant link), `tube2note serve-api` (site backend, FastAPI). Dev setup: `pip install -e ".[dev]" && pytest && ruff check`. Version tags (`v*`) auto-publish to PyPI.
 
-**Geliştiriciler:** `import tube2note.api` (collect/list/status), `tube2note mcp` (Claude/AI asistan bağlantısı), `tube2note serve-api` (site backend'i, FastAPI). Geliştirme: `pip install -e ".[dev]" && pytest && ruff check`. Sürüm etiketleri (`v*`) PyPI'ye otomatik yayınlanır.
+## License
 
-## Lisans
-
-MIT — bkz. [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
