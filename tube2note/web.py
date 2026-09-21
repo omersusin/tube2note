@@ -242,8 +242,17 @@ def list_files(base_dir, limit=300):
             item = {"path": os.path.relpath(full, base_dir).replace(os.sep, "/"), "size": st.st_size,
                     "mtime": int(st.st_mtime)}
             if root == base_dir and ext == ".md":
-                item["done"] = _count_lines(full + ".done")
-                item["skipped"] = _count_lines(full + ".skip")
+                if os.path.exists(full + ".db"):  # SQLite resume store (v0.12+)
+                    try:
+                        from .store import Store
+                        _st = Store(full + ".db")
+                        item["done"], item["skipped"] = _st.counts()
+                        _st.close()
+                    except Exception:
+                        item["done"] = item["skipped"] = 0
+                else:  # legacy sidecars
+                    item["done"] = _count_lines(full + ".done")
+                    item["skipped"] = _count_lines(full + ".skip")
             out.append(item)
     out.sort(key=lambda i: -i["mtime"])
     return out[:limit]

@@ -159,6 +159,20 @@ def _self_test():
     assert [v["id"] for v in _new_videos([{"id": "a"}, {"id": "b"}], {"a"})] == ["b"]
     assert _label_to_secs("00:01") == 1 and _label_to_secs("1:02:03") == 3723
     assert linkify("[00:01] hi", "VID1") == "[00:01](https://youtu.be/VID1?t=1s) hi"
+    from .store import Store
+    _sp = os.path.join(tempfile.mkdtemp(), "t.db")
+    _st = Store(_sp)
+    _st.mark_done("V1", "T", "u", 10)
+    _st.mark_skip("V2", "T2", "u2", "x")
+    _st.note_hash("ab12", "V1")
+    assert _st.done_ids() == {"V1"} and _st.counts() == (1, 1)
+    assert _st.hash_owner("ab12") == "V1" and _st.hash_owner("zz") is None
+    _st.close()
+    from .epub import md_to_epub
+    _md = os.path.join(tempfile.mkdtemp(), "t.md")
+    open(_md, "w").write("# T\n\n## 1. A\n\nhi\n")
+    import zipfile as _zf
+    assert "mimetype" in _zf.ZipFile(md_to_epub(_md)).namelist()
     assert {t["name"] for t in _mcp_handle({"id": 1, "method": "tools/list", "params": {}})[0]["result"]["tools"]} == \
         {"download", "status", "dry_run"}
     assert set(EXTRAS) >= {"pdf", "whisper", "faster-whisper"}

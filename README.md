@@ -95,6 +95,8 @@ tube2note [URL ...] [options] | status | setup | doctor | widget | share
 | `--name-template` | — | Per-video path, e.g. `"{channel}/{title} [{id}]"` (fields: channel, title, id, index, date, lang) |
 | `--split-words` | 0 | Auto-split finished file into N-word parts (0 = off) |
 | `--pdf` | off | Also write PDF next to the Markdown |
+| `--epub` | off | Also write EPUB next to the Markdown (for e-readers) |
+| `--no-dedupe` | off | Keep duplicate transcripts (default: skip same-text re-uploads) |
 | `--sleep` | 2.0 | Pause between videos (s) |
 | `--chunk` | 50 | Long break every N videos |
 | `--chunk-cooldown` | 10 min | Break between chunks, in seconds |
@@ -123,7 +125,7 @@ Subcommands: `status [dir] [--json]`, `setup [--advanced]`, `doctor [--proxy]`, 
 
 Pacing model: `--sleep` between videos, `--fetch-gap` before each subtitle fetch, `--chunk`/`--chunk-cooldown` for long breaks, one retry on 429 (hot retries extend bans — the tool stops and waits instead), 30-min cooldown after 5 consecutive throttles. Ban detection covers real YouTube texts (bot-check, 403, IP block), not just 429.
 
-Resume model: `.done` (finished IDs), `.skip` (JSON lines: id/title/url/reason; legacy `|` fallback), `.words` counts. Skip URLs reconcile every run — `youtu.be`, `/shorts/`, `/embed/`, `/live/` forms all understood. Ctrl+C anytime, re-run to continue. Name collisions guarded per-session AND across sessions (frontmatter `video_id` check).
+Resume model: SQLite store (`<out>.db`, WAL, commit per video; legacy `.done/.skip` auto-imported once). Skip URLs reconcile every run — `youtu.be`, `/shorts/`, `/embed/`, `/live/` forms all understood. Ctrl+C anytime, re-run to continue. Name collisions guarded per-session AND across sessions (frontmatter `video_id` check).
 
 ## Watch mode
 
@@ -211,6 +213,10 @@ Default `full`, `--no-clean` disables, `--clean-level light|full`:
 
 `pip install "tube2note[pdf]"`, then `--pdf` or `tube2note pdf existing.md [...]`. Unicode TTF preferred (covers Turkish); without a font it folds to ASCII with a warning. `doctor` flags a missing Unicode font (Termux: `/system/fonts/DroidSans.ttf` works).
 
+## EPUB
+
+`--epub` or `tube2note epub file.md [...]` — stdlib-only export for e-readers (chapters from `##` sections, links kept).
+
 ## Extras
 
 `extras` are heavy/optional, always behind consent (config records enabled ones):
@@ -296,6 +302,7 @@ Tests run the whole pipeline (and the web UI) offline against a fake yt-dlp in `
 
 ## Changelog
 
+- **0.12.0** — deferred batch: SQLite resume store (+legacy migration), EPUB export (stdlib), RSS fast-path for `--since`, transcript-hash dedupe.
 - **0.11.0** — remaining gaps: `watch --subs` subscriptions file, TUI transcribe/summarize/translate prompts, site form AI fields + local-app button, skip-guarded backend test suite (fastapi = server-only by design).
 - **0.10.0** — round-2 excavation: search JSON limit fix, site form link/srt + local-app button, BACKEND precision (OUT_DIR, MAX_JOBS, /healthz), 16 adversarial tests, CWD-proof PWA tests, skip-guarded backend suite.
 - **0.9.0** — hardening round: watch clean-run-only seen-state, IP-block detection, MCP crash guards, search UTF-8 + limit fix, subs BOM/indent, backend job cap + `?t=` download + `/healthz`, web Timer fix, job try/finally, incomplete-list TTL, VTT poison guard, translate drift warning, cleaner abbreviations + Unicode sentences, link/srt in web UI + TUI + watch, PWA icons + SW registration.

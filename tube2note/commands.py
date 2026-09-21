@@ -230,8 +230,17 @@ def cmd_status(d=".", as_json=False):
         if not f.endswith(".md") or "_part" in f:
             continue
         path = os.path.join(d, f)
-        dn = _count_lines(path + ".done")
-        sk = _count_lines(path + ".skip")
+        if os.path.exists(path + ".db"):  # SQLite resume store (v0.12+)
+            from .store import Store
+            try:
+                st = Store(path + ".db")
+                dn, sk = st.counts()
+                st.close()
+            except Exception:
+                dn, sk = _count_lines(path + ".done"), _count_lines(path + ".skip")
+        else:  # legacy sidecars
+            dn = _count_lines(path + ".done")
+            sk = _count_lines(path + ".skip")
         rows.append([f, str(dn), str(sk), f"{os.path.getsize(path) // 1024} KB"])
     if not rows:
         print(f"No collections in {d}.")

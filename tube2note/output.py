@@ -10,6 +10,17 @@ from .ui import table
 def _purge_video(out, root, layout, vid):
     """Forget one video everywhere so --redo reprocesses it cleanly."""
     removed = []
+    db = out + ".db"
+    if os.path.exists(db):
+        try:
+            from .store import Store
+            st = Store(db)
+            st.cx.execute("DELETE FROM videos WHERE id=?", (vid,))
+            st.cx.commit()
+            st.close()
+            removed.append("resume-db")
+        except Exception:
+            pass
     done_log = out + ".done"
     if os.path.exists(done_log):
         try:
@@ -170,9 +181,8 @@ def _skip_map(skip_log):
     return m
 
 
-def _write_index(root, videos, completed, words_by_id, skip_log):
+def _write_index(root, videos, completed, words_by_id, reasons):
     """INDEX.md: every video with status, words and per-video file."""
-    reasons = _skip_map(skip_log)
     rows = []
     for v in videos:
         vid = v["id"]

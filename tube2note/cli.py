@@ -77,6 +77,17 @@ def main():
             except (OSError, SystemExit) as e:
                 print(f"! {f}: {e}")
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "epub":
+        from .epub import md_to_epub
+        if len(sys.argv) < 3:
+            print("Usage: tube2note epub <file.md> [...]")
+            return
+        for f in sys.argv[2:]:
+            try:
+                print("EPUB: " + md_to_epub(f), flush=True)
+            except OSError as e:
+                print(f"! {f}: {e}")
+        return
     ap = argparse.ArgumentParser(prog="tube2note", description="YouTube -> single Markdown (NotebookLM feed)")
     ap.add_argument("urls", nargs="*", help="channel / playlist / video URLs")
     ap.add_argument("-o", "--out", default="tube2note.md")
@@ -109,6 +120,9 @@ def main():
     ap.add_argument("--profile", default=None, help="config profile name (or YT2MD_PROFILE)")
     ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
     ap.add_argument("--pdf", action="store_true", help="also write PDF next to the Markdown (needs fpdf2)")
+    ap.add_argument("--epub", action="store_true", help="also write EPUB next to the Markdown (stdlib, for e-readers)")
+    ap.add_argument("--no-dedupe", dest="no_dedupe", action="store_true",
+                    help="keep duplicate transcripts (default: skip same-text re-uploads)")
     ap.add_argument("--transcribe", action="store_true", help="transcribe captionless videos via Gemini API (needs GEMINI_API_KEY)")
     ap.add_argument("--engine", default="api", help="transcribe engine: api or local (whisper.cpp extra)")
     ap.add_argument("--yes", action="store_true", help="auto-answer yes to extra download prompts")
@@ -170,6 +184,8 @@ def main():
                 split_words=(a.split_words or last.get("split_words", 0)), verbose=a.verbose,
                 layout=last.get("layout", "single"), template=last.get("template", ""),
                 pdf=(a.pdf or last.get("pdf", False)),
+                epub=(a.epub or last.get("epub", False)),
+                dedupe=(False if a.no_dedupe else last.get("dedupe", True)),
                 proxy=(a.proxy or last.get("proxy")), cookiefile=(a.cookies or last.get("cookiefile")),
                 since=(a.since or last.get("since")),
                 translate=(a.translate or last.get("translate")),
@@ -194,4 +210,5 @@ def main():
             transcribe=a.transcribe, summarize=a.summarize,
             gemini_model=a.gemini_model or _GEMINI_MODEL, engine=a.engine,
             translate=a.translate, auto_yes=a.yes,
-            link_timestamps=bool(a.link_timestamps), srt=bool(a.srt)))
+            link_timestamps=bool(a.link_timestamps), srt=bool(a.srt), epub=a.epub,
+            dedupe=not a.no_dedupe))

@@ -1,9 +1,8 @@
 """The download/convert pipeline: per-video fetch and the resumable job runner."""
 import datetime
 import glob
-import json
+import hashlib
 import os
-import re
 import shutil
 import tempfile
 import time
@@ -20,7 +19,6 @@ from .llm import _GEMINI_MODEL, _gemini_summarize, _translate_chunks, _try_trans
 from .naming import DEFAULT_TEMPLATES, render_template
 from .output import (
     _collection_override,
-    _count_lines,
     _existing_vid,
     _frontmatter,
     _unique_path,
@@ -29,7 +27,8 @@ from .output import (
     split_output,
 )
 from .pdf import md_to_pdf
-from .source import _get_vtt, expand, pick_sub
+from .source import _get_vtt, _parse_since, expand, pick_sub
+from .store import VID_RE, Store
 from .throttle import Bucket, _countdown, _is_throttle
 from .ui import dash_end, dash_update, dim, green, log, panel, red, set_verbose
 from .vtt import _join_paras, vtt_segments
@@ -188,9 +187,19 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
             workers=1, clean=True, clean_level="full", transcribe=False, summarize=False,
             gemini_model=_GEMINI_MODEL, engine="api", translate=None, auto_yes=False,
-            link_timestamps=False, srt=False):
+            link_timestamps=False, srt=False, epub=False, dedupe=True):
     if videos is None:
-        videos, _ = expand(urls, max_n, since)
+        videos = None
+        if since and len(urls) == 1:  # fast path: channel RSS avoids the full listing
+            try:
+                from .source import rss_videos
+                videos = rss_videos(urls[0], _parse_since(since), max_n)
+                if videos is not None:
+                    print(f"list from RSS ({len(videos)} videos since {since})", flush=True)
+            except Exception:
+                videos = None
+        if videos is None:
+            videos, _ = expand(urls, max_n, since)
     if outdir and outdir != ".":
         outdir = os.path.expanduser(outdir)
         os.makedirs(outdir, exist_ok=True)
@@ -235,24 +244,28 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                translate=translate, clean=clean, clean_level=clean_level,
                transcribe=transcribe, summarize=summarize, gemini_model=gemini_model,
                 engine=engine, fetch_gap=fetch_gap, workers=workers, pdf=pdf,
-                link_timestamps=link_timestamps, srt=srt)
+                link_timestamps=link_timestamps, srt=srt, epub=epub, dedupe=dedupe)
     print(f"{total} videos found", flush=True)
     if not videos:
         return {"ok": 0, "skipped": 0, "total": 0}
     done_log, skip_log = out + ".done", out + ".skip"
-    done = set()
-    if not fresh and os.path.exists(done_log):
-        with open(done_log, encoding="utf-8") as f:
-            done = {ln.strip() for ln in f if ln.strip()}
+    store = Store(out + ".db")
+    if fresh:
+        try:
+            store.cx.execute("DELETE FROM videos")
+            store.cx.commit()
+        except Exception:
+            pass
+    elif store.import_sidecars(done_log, skip_log):
+        print("migrated legacy .done/.skip into resume database", flush=True)
+    done = set() if fresh else store.done_ids()
+    if done:
         print(f"resuming: {len(done)} videos already done", flush=True)
     fresh_start = fresh or not os.path.exists(out)
     mode = "w" if fresh_start else "a"
-    fout = dlog = slog = wlog = None
+    fout = None
     try:
         fout = open(out, mode, encoding="utf-8")
-        dlog = open(done_log, "w" if fresh_start else "a", encoding="utf-8")
-        slog = open(skip_log, "w" if fresh_start else "a", encoding="utf-8")
-        wlog = open(out + ".words", "w" if fresh_start else "a", encoding="utf-8")
         if fresh_start:
             done = set()
         if mode == "w":
@@ -261,15 +274,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                        f"- Languages: {','.join(langs)}\n\nFeed this file to NotebookLM as a source.\n\n---\n\n")
         todo = max(0, total - len(done))
         completed = set(done)
-        words_by_id = {}
-        if not fresh_start and os.path.exists(out + ".words"):
-            try:
-                for ln in open(out + ".words", encoding="utf-8"):
-                    p = ln.split()
-                    if len(p) == 2:
-                        words_by_id[p[0]] = int(p[1])
-            except (OSError, ValueError):
-                pass
+        words_by_id = {} if fresh_start else store.words_map()
         print(f"target: {todo} videos (chunk: {chunk}, chunk break: {chunk_cooldown // 60} min, layout: {layout})", flush=True)
         ok, skip, words, consec, since_break, status = 0, [], 0, 0, 0, ""
         used_paths = set()
@@ -327,6 +332,16 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     consec, status = 0, "no subtitles"
                     continue
                 text = res["text"]
+                if dedupe and text:
+                    sha = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+                    owner = store.hash_owner(sha)
+                    if owner and owner != v["id"]:
+                        if verbose:
+                            log(f"  ! duplicate transcript of {owner}, skipped")
+                        skip.append((title, wurl, f"duplicate transcript of {owner}"))
+                        consec, status = 0, "duplicate"
+                        continue
+                    store.note_hash(sha, v["id"])
                 if link_timestamps:
                     text = linkify(text, v["id"])
                 if res.get("cached") and verbose:
@@ -364,16 +379,13 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                                f"{' (transcribed)' if res.get('trans') else (' (auto)' if auto else '')}\n"
                                f"{sumblock}{transblock}\n{text}\n\n---\n\n")
                     fout.flush()
-                    dlog.write(v["id"] + "\n")
-                    dlog.flush()
+                    store.mark_done(v["id"], title, wurl, len(text.split()))
                     ok += 1
                     nwords = len(text.split())
                     words += nwords
                     completed.add(v["id"])
                     done.add(v["id"])
                     words_by_id[v["id"]] = nwords
-                    wlog.write(f"{v['id']} {nwords}\n")
-                    wlog.flush()
                     if layout != "single":
                         fields = {"channel": v.get("channel") or res.get("channel") or "channel",
                                   "title": title or v["id"], "id": v["id"],
@@ -415,44 +427,27 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         dash_update(todo, todo, "done", ok, len(skip), words, t0)
         dash_end()
         for t, u, s in skip:
-            slog.write(json.dumps({"title": t, "url": u, "reason": s}, ensure_ascii=False) + "\n")
+            vid = (VID_RE.search(u or "") or [None, u])[1]
+            store.mark_skip(vid or u, t, u, s)
         fout.close()
-        dlog.close()
-        slog.close()
-        wlog.close()
         shutil.rmtree(tmpdir, ignore_errors=True)
     finally:  # Ctrl+C / SystemExit mid-run: never leak handles or temp audio
-        for _f in (fout, dlog, slog, wlog):
-            try:
-                if _f is not None:
-                    _f.close()
-            except Exception:
-                pass
+        try:
+            if fout is not None:
+                fout.close()
+        except Exception:
+            pass
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
         except NameError:
             pass
     if layout != "single":
-        _write_index(root, videos, completed, words_by_id, skip_log)
+        _write_index(root, videos, completed, words_by_id, store.skip_reasons())
         print(f"index: {os.path.join(root, 'INDEX.md')}", flush=True)
-    try:  # reconcile .skip: drop fixed videos + dedupe, so counts/tail stay honest
-        seen, kept = set(), []
-        if os.path.exists(skip_log):
-            for ln in open(skip_log, encoding="utf-8"):
-                s = ln.strip()
-                if not s:
-                    continue
-                r = re.search(r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})", s)
-                key = r.group(1) if r else s
-                if key not in completed and key not in seen:
-                    seen.add(key)
-                    kept.append(s)
-        with open(skip_log, "w", encoding="utf-8") as f:
-            f.write("\n".join(kept) + ("\n" if kept else ""))
-    except OSError:
-        pass
-    ndone = _count_lines(done_log)
-    nskip = _count_lines(skip_log)
+    # reconcile skips: drop videos that completed since, so counts/tail stay honest
+    for vid in list(completed):
+        store.unskip(vid)
+    ndone, nskip = store.counts()
     if ndone + nskip >= len(videos):
         if nskip > 0:
             tail_done = False
@@ -465,15 +460,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             if not tail_done:
                 with open(out, "a", encoding="utf-8") as f:
                     f.write("\n## Skipped\n\n")
-                    for ln in open(skip_log, encoding="utf-8"):
-                        s = ln.strip()
-                        if not s:
-                            continue
-                        try:
-                            d = json.loads(s)
-                            f.write(f"- [{d.get('title', '?')}]({d.get('url', '')}) — {d.get('reason', '')}\n")
-                        except ValueError:
-                            f.write(f"- {s}\n")
+                    for vid, title, url, reason in store.skips():
+                        f.write(f"- [{title or '?'}]({url or ''}) — {reason}\n")
         dash_end()
         print(panel("Done", [
             f"{green(str(ndone))} videos -> {out} ({nskip} skipped)",
@@ -501,7 +489,14 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 except SystemExit as e:
                     print(e)
                     break
+        if epub:
+            from .epub import md_to_epub
+            try:
+                print("EPUB: " + md_to_epub(out), flush=True)
+            except OSError as e:
+                print(f"! EPUB failed: {e}")
     else:
         dash_end()
         print(f"Checkpoint: {ok} videos, {words} words -> {out} (total: {ndone}/{len(videos)})")
+    store.close()
     return {"ok": ok, "skipped": nskip, "total": len(videos)}

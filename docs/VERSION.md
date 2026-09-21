@@ -1,4 +1,7 @@
-[![version v0.11.0](https://img.shields.io/badge/version-v0.11.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.11.0)
+[![version v0.12.0](https://img.shields.io/badge/version-v0.12.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.12.0)
+
+## v0.11.0
+6ee0c62 0.11.0: watch subs, TUI AI prompts, site AI fields, backend suite
 
 ## v0.10.0
 65918f3 0.10.0: round-2 excavation (site form, backend docs, 16 adversarial tests)

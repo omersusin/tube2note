@@ -23,7 +23,8 @@ def collect(urls, out="tube2note.md", profile=None, overrides=None, **kw):
         transcribe=kw.get("transcribe", False), summarize=kw.get("summarize", False),
         gemini_model=kw.get("gemini_model") or _GEMINI_MODEL, engine=kw.get("engine", "api"),
         translate=kw.get("translate"), auto_yes=kw.get("auto_yes", False),
-        link_timestamps=kw.get("link_timestamps", False), srt=kw.get("srt", False))
+        link_timestamps=kw.get("link_timestamps", False), srt=kw.get("srt", False),
+        epub=kw.get("epub", False), dedupe=kw.get("dedupe", True))
     return _exit_code(res), (res or {})
 
 def list_videos(urls, max_n=100, since=None):

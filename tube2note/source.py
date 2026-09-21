@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import random
+import re
 import sys
 import time
 import urllib.request
@@ -90,6 +91,64 @@ def _list_save(urls, max_n, since, videos, hint, complete):
                   open(p, "w", encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         pass
+
+
+def _channel_id(url):
+    """UC-id straight from /channel/ URLs; single cheap lookup otherwise. None if not a channel."""
+    m = re.search(r"/channel/(UC[\w-]{22})", url or "")
+    if m:
+        return m.group(1)
+    if not re.search(r"/@[^/]+|/c/[^/]+|/user/[^/]+", url or ""):
+        return None
+    try:
+        with YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True,
+                        "socket_timeout": 20}) as ydl:
+            info = ydl.extract_info(url, download=False)
+        cid = (info or {}).get("channel_id") or ""
+        return cid if re.fullmatch(r"UC[\w-]{22}", cid) else None
+    except Exception:
+        return None
+
+
+def rss_videos(url, since_ts, max_n=100, opener=None):
+    """Fast path for --since on channels: official RSS feed, no full listing.
+    Returns [videos] (possibly empty = nothing new) or None (not usable -> fall back)."""
+    if not since_ts:
+        return None
+    cid = _channel_id(url)
+    if not cid:
+        return None
+    try:
+        req = _make_req(f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}")
+        ctx = opener(req) if opener else urllib.request.urlopen(req, timeout=20)
+        with ctx as r:
+            data = r.read().decode("utf-8", errors="ignore")
+        import xml.etree.ElementTree as ET
+        ns = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
+        root = ET.fromstring(data)
+        chan = (root.find("a:title", ns).text if root.find("a:title", ns) is not None else "")
+        out = []
+        for e in root.findall("a:entry", ns):
+            vid = e.find("yt:videoId", ns)
+            pub = e.find("a:published", ns)
+            title = e.find("a:title", ns)
+            if vid is None or pub is None:
+                continue
+            try:
+                ts = datetime.datetime.strptime(pub.text[:19], "%Y-%m-%dT%H:%M:%S").timestamp()
+            except (ValueError, TypeError):
+                continue
+            if ts < since_ts:
+                continue
+            vid = vid.text.strip()
+            out.append({"id": vid, "title": (title.text if title is not None else vid) or vid,
+                        "channel": chan or None,
+                        "url": f"https://www.youtube.com/watch?v={vid}"})
+            if len(out) >= max_n:
+                break
+        return out
+    except Exception:
+        return None
 
 
 def expand(urls, max_n, since=None, fresh=False):

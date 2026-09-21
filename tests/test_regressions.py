@@ -48,7 +48,10 @@ def test_parallel_workers_write_every_video(run, home):
     run("-d", str(home / "w"), "-o", "w.md", "--lang", "en,tr", "--workers", "2", LIST)
     md = (home / "w" / "w.md").read_text(encoding="utf-8")
     assert "## 1. Alpha talk" in md
-    assert (home / "w" / "w.md.done").read_text().split() == ["aaaaaaaaaaa", "bbbbbbbbbbb", "ddddddddddd"]
+    from tube2note.store import Store
+    st = Store(str(home / "w" / "w.md.db"))
+    assert st.done_ids() == {"aaaaaaaaaaa", "bbbbbbbbbbb", "ddddddddddd"}
+    st.close()
 
 
 def test_public_mode_never_passes_gemini_flags(tmp_path, monkeypatch):

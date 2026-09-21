@@ -24,7 +24,11 @@ def test_finally_closes_on_systemexit(home, monkeypatch):
                         ([{"id": "aaaaaaaaaaa", "title": "A", "url": "u"}], None))
     with pytest.raises(SystemExit):
         j.run_job(["u"], "s.md", "en", 10, 0, outdir=str(home / "o"))
-    assert os.path.exists(home / "o" / "s.md.done")  # flushed before the raise
+    assert os.path.exists(home / "o" / "s.md.db")  # resume store written before the raise
+    from tube2note.store import Store
+    st = Store(str(home / "o" / "s.md.db"))
+    assert "aaaaaaaaaaa" in st.done_ids()
+    st.close()
     assert not os.path.exists(tmp)  # temp audio cleaned by finally
 
 
