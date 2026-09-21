@@ -133,6 +133,8 @@ def main():
     ap.add_argument("--gemini-model", default=None, help="Gemini model for transcribe/summarize (default: gemini-2.5-flash-lite)")
     ap.add_argument("--proxy", default=None, help="proxy URL for all requests (yt-dlp syntax, e.g. socks5://127.0.0.1:1080)")
     ap.add_argument("--cookies", default=None, help="Netscape cookies.txt file (helps logged-in/age-gated content)")
+    ap.add_argument("--cookies-from-browser", default=None,
+                    help="read cookies from a browser, e.g. chrome, firefox, 'chrome:Profile 1'")
     ap.add_argument("--tui", action="store_true", help="interactive mode (short command)")
     ap.add_argument("--verbose", action="store_true", help="scrolling log lines instead of the live dashboard")
     ap.add_argument("--dry-run", action="store_true", help="list + estimate only, download nothing")
@@ -190,6 +192,7 @@ def main():
                 obsidian=(a.obsidian or last.get("obsidian", False)),
                 dedupe=(False if a.no_dedupe else last.get("dedupe", True)),
                 proxy=(a.proxy or last.get("proxy")), cookiefile=(a.cookies or last.get("cookiefile")),
+                cookies_from_browser=(a.cookies_from_browser or last.get("cookies_from_browser")),
                 since=(a.since or last.get("since")),
                 translate=(a.translate or last.get("translate")),
                 clean=last.get("clean", True), clean_level=(a.clean_level or last.get("clean_level", "full")),
@@ -214,4 +217,5 @@ def main():
             gemini_model=a.gemini_model or _GEMINI_MODEL, engine=a.engine,
             translate=a.translate, auto_yes=a.yes,
             link_timestamps=bool(a.link_timestamps), srt=bool(a.srt), epub=a.epub,
-            dedupe=not a.no_dedupe, obsidian=a.obsidian))
+            dedupe=not a.no_dedupe, obsidian=a.obsidian,
+            cookies_from_browser=a.cookies_from_browser))

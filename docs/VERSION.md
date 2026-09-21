@@ -1,4 +1,7 @@
-[![version v0.13.0](https://img.shields.io/badge/version-v0.13.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.13.0)
+[![version v0.14.0](https://img.shields.io/badge/version-v0.14.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.14.0)
+
+## v0.13.0
+75d5795 0.13.0: obsidian notes
 
 ## v0.12.0
 5a06957 0.12.0: sqlite store, epub, rss fast-path, dedupe

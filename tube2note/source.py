@@ -93,7 +93,7 @@ def _list_save(urls, max_n, since, videos, hint, complete):
         pass
 
 
-def _channel_id(url):
+def _channel_id(url, cookies_from_browser=None):
     """UC-id straight from /channel/ URLs; single cheap lookup otherwise. None if not a channel."""
     m = re.search(r"/channel/(UC[\w-]{22})", url or "")
     if m:
@@ -101,8 +101,10 @@ def _channel_id(url):
     if not re.search(r"/@[^/]+|/c/[^/]+|/user/[^/]+", url or ""):
         return None
     try:
-        with YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True,
-                        "socket_timeout": 20}) as ydl:
+        opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 20}
+        if cookies_from_browser:
+            opts["cookiesfrombrowser"] = cookies_from_browser
+        with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
         cid = (info or {}).get("channel_id") or ""
         return cid if re.fullmatch(r"UC[\w-]{22}", cid) else None
@@ -110,12 +112,12 @@ def _channel_id(url):
         return None
 
 
-def rss_videos(url, since_ts, max_n=100, opener=None):
+def rss_videos(url, since_ts, max_n=100, opener=None, cookies_from_browser=None):
     """Fast path for --since on channels: official RSS feed, no full listing.
     Returns [videos] (possibly empty = nothing new) or None (not usable -> fall back)."""
     if not since_ts:
         return None
-    cid = _channel_id(url)
+    cid = _channel_id(url, cookies_from_browser)
     if not cid:
         return None
     try:
@@ -151,12 +153,14 @@ def rss_videos(url, since_ts, max_n=100, opener=None):
         return None
 
 
-def expand(urls, max_n, since=None, fresh=False):
+def expand(urls, max_n, since=None, fresh=False, cookies_from_browser=None):
     cached = None if fresh else _list_load(urls, max_n, since)
     if cached is not None:
         print(f"list from cache ({len(cached[0])} videos)", flush=True)
         return cached
     ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 20}
+    if cookies_from_browser:
+        ydl_opts["cookiesfrombrowser"] = cookies_from_browser
     out, hint = [], None
     since_ts = _parse_since(since) if since else 0
     with YoutubeDL(ydl_opts) as ydl:

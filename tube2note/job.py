@@ -187,19 +187,21 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             proxy=None, cookiefile=None, since=None, profile=None, fetch_gap=10,
             workers=1, clean=True, clean_level="full", transcribe=False, summarize=False,
             gemini_model=_GEMINI_MODEL, engine="api", translate=None, auto_yes=False,
-            link_timestamps=False, srt=False, epub=False, dedupe=True, obsidian=False):
+            link_timestamps=False, srt=False, epub=False, dedupe=True, obsidian=False,
+            cookies_from_browser=None):
     if videos is None:
         videos = None
         if since and len(urls) == 1:  # fast path: channel RSS avoids the full listing
             try:
                 from .source import rss_videos
-                videos = rss_videos(urls[0], _parse_since(since), max_n)
+                videos = rss_videos(urls[0], _parse_since(since), max_n,
+                                    cookies_from_browser=cookies_from_browser)
                 if videos is not None:
                     print(f"list from RSS ({len(videos)} videos since {since})", flush=True)
             except Exception:
                 videos = None
         if videos is None:
-            videos, _ = expand(urls, max_n, since)
+            videos, _ = expand(urls, max_n, since, cookies_from_browser=cookies_from_browser)
     if outdir and outdir != ".":
         outdir = os.path.expanduser(outdir)
         os.makedirs(outdir, exist_ok=True)
@@ -245,7 +247,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                transcribe=transcribe, summarize=summarize, gemini_model=gemini_model,
                 engine=engine, fetch_gap=fetch_gap, workers=workers, pdf=pdf,
                 link_timestamps=link_timestamps, srt=srt, epub=epub, dedupe=dedupe,
-                obsidian=obsidian)
+                obsidian=obsidian, cookies_from_browser=cookies_from_browser)
     print(f"{total} videos found", flush=True)
     if not videos:
         return {"ok": 0, "skipped": 0, "total": 0}
@@ -289,6 +291,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             ydl_opts["proxy"] = proxy
         if cookiefile:
             ydl_opts["cookiefile"] = os.path.expanduser(cookiefile)
+        if cookies_from_browser:
+            ydl_opts["cookiesfrombrowser"] = cookies_from_browser
         bucket = Bucket(rate=0.15, capacity=2) if workers > 1 else None
         work = [(i, v) for i, v in enumerate(videos, 1) if v["id"] not in done]
         tmpdir = tempfile.mkdtemp(prefix="tube2note-")

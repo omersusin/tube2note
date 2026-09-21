@@ -143,7 +143,7 @@ def test_dedupe_skips_same_transcript(home, monkeypatch):
     import tube2note.job as j
     vids = [{"id": "aaaaaaaaaaa", "title": "A", "url": "http://a"},
             {"id": "bbbbbbbbbbb", "title": "B", "url": "http://b"}]
-    monkeypatch.setattr(j, "expand", lambda urls, max_n, since=None, fresh=False: (vids, None))
+    monkeypatch.setattr(j, "expand", lambda urls, max_n, since=None, fresh=False, **k: (vids, None))
 
     def fake_fetch(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True, clean_level="full",
                    *a):
@@ -165,3 +165,24 @@ def test_obsidian_frontmatter(run, home):
         "--obsidian", "https://www.youtube.com/playlist?list=PLfake")
     md = read(home / "o" / "videos" / "Alpha talk [aaaaaaaaaaa].md")
     assert "tags: [youtube, transcript]" in md and "aliases:" in md
+
+
+def test_cookies_from_browser_reaches_ydl(home, monkeypatch, fake):
+    import tube2note.job as j
+    seen = {}
+    real_ydl = j.YoutubeDL
+
+    class SpyYDL(real_ydl):
+        def __init__(self, *a, **k):
+            seen.update(k.get("params", a[0] if a else {}))
+            super().__init__(*a, **k)
+    monkeypatch.setattr(j, "YoutubeDL", SpyYDL)
+    import sys
+
+    from tube2note.cli import main
+    monkeypatch.setattr(sys, "argv", ["tube2note", "--fetch-gap", "0", "--sleep", "0",
+                                      "--cookies-from-browser", "chrome",
+                                      "-d", str(home / "o"), "-o", "c.md",
+                                      "https://www.youtube.com/playlist?list=PLfake"])
+    main()
+    assert seen.get("cookiesfrombrowser") == "chrome"

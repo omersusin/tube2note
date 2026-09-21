@@ -98,6 +98,7 @@ tube2note [URL ...] [options] | status | setup | doctor | widget | share
 | `--epub` | off | Also write EPUB next to the Markdown (for e-readers) |
 | `--no-dedupe` | off | Keep duplicate transcripts (default: skip same-text re-uploads) |
 | `--obsidian` | off | Obsidian-friendly notes: tags + aliases in frontmatter (pairs with `--layout videos`) |
+| `--cookies-from-browser` | — | Read cookies from a browser: `chrome`, `firefox`, `chrome:Profile 1` |
 | `--sleep` | 2.0 | Pause between videos (s) |
 | `--chunk` | 50 | Long break every N videos |
 | `--chunk-cooldown` | 10 min | Break between chunks, in seconds |
@@ -303,6 +304,7 @@ Tests run the whole pipeline (and the web UI) offline against a fake yt-dlp in `
 
 ## Changelog
 
+- **0.14.0** — `--cookies-from-browser` (no more cookies.txt exporting).
 - **0.13.0** — `--obsidian` notes (tags + aliases, Dataview-ready).
 - **0.12.0** — deferred batch: SQLite resume store (+legacy migration), EPUB export (stdlib), RSS fast-path for `--since`, transcript-hash dedupe.
 - **0.11.0** — remaining gaps: `watch --subs` subscriptions file, TUI transcribe/summarize/translate prompts, site form AI fields + local-app button, skip-guarded backend test suite (fastapi = server-only by design).

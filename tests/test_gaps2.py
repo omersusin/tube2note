@@ -20,7 +20,7 @@ def test_finally_closes_on_systemexit(home, monkeypatch):
         yield 1, {"id": "aaaaaaaaaaa", "title": "A", "url": "u"}, dict(blob)
         raise SystemExit(1)
     monkeypatch.setattr(j, "_stream", boom)
-    monkeypatch.setattr(j, "expand", lambda urls, max_n, since=None, fresh=False:
+    monkeypatch.setattr(j, "expand", lambda urls, max_n, since=None, fresh=False, **k:
                         ([{"id": "aaaaaaaaaaa", "title": "A", "url": "u"}], None))
     with pytest.raises(SystemExit):
         j.run_job(["u"], "s.md", "en", 10, 0, outdir=str(home / "o"))

@@ -25,7 +25,8 @@ def collect(urls, out="tube2note.md", profile=None, overrides=None, **kw):
         translate=kw.get("translate"), auto_yes=kw.get("auto_yes", False),
         link_timestamps=kw.get("link_timestamps", False), srt=kw.get("srt", False),
         epub=kw.get("epub", False), dedupe=kw.get("dedupe", True),
-        obsidian=kw.get("obsidian", False))
+        obsidian=kw.get("obsidian", False),
+        cookies_from_browser=kw.get("cookies_from_browser"))
     return _exit_code(res), (res or {})
 
 def list_videos(urls, max_n=100, since=None):
