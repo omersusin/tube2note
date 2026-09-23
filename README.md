@@ -1,4 +1,4 @@
-<img src="docs/icon-192.png" width="64" alt="tube2note logo">
+<img src="docs/banner.png" alt="tube2note banner">
 
 # tube2note — Turn YouTube videos into text
 
