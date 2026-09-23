@@ -47,3 +47,8 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["F", "I"]
+
+# Flet Android: R8/ProGuard runs by default on release builds (keep defaults —
+# our app does no reflective lookups). Split per ABI for smaller downloads.
+[tool.flet.android]
+split_per_abi = true
