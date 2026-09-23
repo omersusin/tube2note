@@ -67,6 +67,11 @@ def main(page: ft.Page):
     clean = ft.Checkbox(label="Clean transcripts", value=True)
     pdf = ft.Checkbox(label="Also write PDF", value=False)
     epub = ft.Checkbox(label="Also write EPUB", value=False)
+    tr_summarize = ft.Checkbox(label="Summarize each video (needs key)", value=False)
+    tr_transcribe = ft.Checkbox(label="Transcribe videos without captions (needs key)", value=False)
+    tr_translate = ft.TextField(label="Translate to (e.g. tr, empty=off)", width=220)
+    gemini_key = ft.TextField(label="GEMINI_API_KEY (free at aistudio.google.com)", password=True,
+                              can_reveal_password=True, expand=True)
     log = ft.Text("", selectable=True)
     bar = ft.ProgressBar(visible=False, expand=True)
     go = ft.Button(content="Download")
@@ -137,6 +142,10 @@ def main(page: ft.Page):
             page.update()
             return
         outdir = _outdir()
+        if (gemini_key.value or "").strip():
+            os.environ["GEMINI_API_KEY"] = gemini_key.value.strip()
+        ai = {"transcribe": tr_transcribe.value, "summarize": tr_summarize.value,
+              "translate": (tr_translate.value or "").strip() or None}
         try:
             n = max(1, int(max_n.value or 20))
             split = max(0, int(split_n.value or 0))
@@ -158,7 +167,8 @@ def main(page: ft.Page):
                    "split_words": split, "workers": wk,
                    "ts": timestamps.value, "link_timestamps": link_ts.value,
                    "srt": srt.value, "clean": clean.value,
-                   "pdf": pdf.value, "epub": epub.value},
+                   "pdf": pdf.value, "epub": epub.value,
+                   **ai},
             )
             log.value = (f"Done: {res.get('ok', 0)}/{res.get('total', 0)} videos.\n"
                          f"Saved to {outdir}/{fname}\n"
@@ -180,6 +190,9 @@ def main(page: ft.Page):
         ft.Row([layout, since]),
         ft.Row([split_n, workers_n]),
         timestamps, link_ts, srt, clean, pdf, epub,
+        tr_transcribe, tr_summarize,
+        ft.Row([tr_translate]),
+        ft.Row([gemini_key]),
         ft.Row([preview]),
         files_list,
         bar,
