@@ -82,9 +82,15 @@ a#dl[hidden]{display:none}
 <label class="check"><input id="timestamps" type="checkbox"> timestamps</label>
 <label class="check"><input id="link_timestamps" type="checkbox"> clickable links</label>
 <label class="check"><input id="srt" type="checkbox"> .srt sidecars</label>
+<label class="check"><input id="vtt" type="checkbox"> .vtt sidecars</label>
+<label class="check"><input id="chapters" type="checkbox"> chapters</label>
+<label class="check"><input id="sponsorblock" type="checkbox"> skip sponsors</label>
 <label class="check"><input id="clean" type="checkbox" checked> clean</label>
 <label class="check"><input id="pdf" type="checkbox"> PDF</label>
 <label class="check"><input id="epub" type="checkbox"> EPUB</label>
+<label class="check"><input id="anki" type="checkbox"> anki</label>
+<label class="check"><input id="cite" type="checkbox"> citations</label>
+<label class="check"><input id="obsidian" type="checkbox"> obsidian</label>
 </div>
 </section>
 <section class="grp" aria-label="Options">
@@ -92,6 +98,8 @@ a#dl[hidden]{display:none}
 <div class="grid2">
 <label class="field" for="split"><span>Split every N words (0 = off)</span><input id="split" type="number" value="0" min="0" title="split every N words"></label>
 <label class="field" for="workers"><span>Workers (1-4)</span><input id="workers" type="number" value="1" min="1" max="4"></label>
+<label class="field" for="cookies"><span>Cookies file (optional)</span><input id="cookies" placeholder="path/to/cookies.txt"></label>
+<label class="field" for="cookies_from_browser"><span>Cookies from browser (optional)</span><input id="cookies_from_browser" placeholder="chrome"></label>
 </div>
 </section>
 <section class="grp" aria-label="AI">

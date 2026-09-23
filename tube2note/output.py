@@ -1,4 +1,5 @@
 """Output files: front matter, index, .done/.skip logs, splitting, purging."""
+import datetime
 import glob
 import json
 import os
@@ -180,25 +181,49 @@ def split_output(out, budget):
     return paths
 
 
+def _fmt_dur(secs):
+    """Seconds -> H:MM:SS (ponytail: no zero-pad hour, enough for notes)."""
+    try:
+        s = int(secs)
+    except (TypeError, ValueError):
+        return ""
+    if s < 0:
+        s = 0
+    return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+
 def _frontmatter(title, wurl, channel, vid, lg, auto, meta=None, obsidian=False):
     def clean(s):
         s = " ".join(str(s).split()).replace('"', "'").replace("\\", "/")
         return s.strip() or "unknown"
+    def qs(s):
+        return '"{}"'.format(str(s).replace('"', "'"))
     t = clean(title or vid)
     c = clean(channel or "unknown")
-    out = (f"---\ntitle: \"{t}\"\nsource: {wurl}\nchannel: \"{c}\"\n"
-           f"video_id: {vid}\nlanguage: {lg}{' (auto)' if auto else ''}\n")
+    ch_slug = re.sub(r"[^a-z0-9]+", "-", c.lower()).strip("-") or "unknown"
+    today = datetime.date.today().isoformat()
+    out = (f"---\ntitle: \"{t}\"\nurl: {qs(wurl)}\nsource: {qs(wurl)}\nchannel: \"{c}\"\n"
+           f"videoId: {vid}\nvideo_id: {vid}\nlanguage: {lg}{' (auto)' if auto else ''}\n"
+           f"created: {today}\nwatched: {today}\nstatus: watched\n"
+           f"tags: [youtube, youtube/channel/{ch_slug}]\n")
     if obsidian:  # Dataview-friendly: tags + alias
-        out += "tags: [youtube, transcript]\naliases: [\"{}\"]\n".format(t)
+        out = out.replace("tags: [youtube, youtube/channel/",
+                          "tags: [youtube, transcript, youtube/channel/")
+        out += "aliases: [\"{}\"]\n".format(t)
     if meta:
         if meta.get("method"):
             out += f"method: {meta['method']}\n"
         if meta.get("published"):
             out += f"published: {meta['published']}\n"
         if meta.get("duration") is not None:
+            out += f"duration: {qs(_fmt_dur(meta['duration']))}\n"
             out += f"duration_secs: {meta['duration']}\n"
         if meta.get("views") is not None:
             out += f"views: {meta['views']}\n"
+        if meta.get("channel_url"):
+            out += f"channelUrl: {qs(meta['channel_url'])}\n"
+        if meta.get("thumbnail"):
+            out += f"thumbnailUrl: {qs(meta['thumbnail'])}\n"
         if meta.get("description"):
             out += f"description: \"{clean(meta['description'][:500])}\"\n"
     return out + "---\n\n"
@@ -209,7 +234,9 @@ def _video_meta(info):
     ud = info.get("upload_date") or ""
     pub = f"{ud[:4]}-{ud[4:6]}-{ud[6:8]}" if len(ud) == 8 else ""
     return {"published": pub, "duration": info.get("duration"),
-            "views": info.get("view_count"), "description": info.get("description") or ""}
+            "views": info.get("view_count"), "description": info.get("description") or "",
+            "channel_url": info.get("channel_url") or info.get("uploader_url") or "",
+            "thumbnail": info.get("thumbnail") or ""}
 
 
 def _existing_vid(path):

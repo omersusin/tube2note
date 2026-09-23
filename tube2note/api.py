@@ -29,7 +29,10 @@ def collect(urls, out="tube2note.md", profile=None, overrides=None, **kw):
         obsidian=kw.get("obsidian", False), jsonl=kw.get("jsonl", False),
         ts_every=kw.get("ts_every", 0), single_line=kw.get("single_line", False),
         txt=kw.get("txt", False), videos=kw.get("videos"),
-        cookies_from_browser=kw.get("cookies_from_browser"))
+        cookies_from_browser=kw.get("cookies_from_browser"),
+        vtt=kw.get("vtt", False), anki=kw.get("anki", False),
+        chapters=kw.get("chapters", False), sponsorblock=kw.get("sponsorblock", False),
+        cite=kw.get("cite", False))
     return _exit_code(res), (res or {})
 
 def list_videos(urls, max_n=100, since=None):

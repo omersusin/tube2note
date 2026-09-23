@@ -12,6 +12,14 @@ def link_ts(label, vid, secs):
     return f"[{label}](https://youtu.be/{vid}?t={int(secs)}s)"
 
 
+def chapter_heading(title, vid, secs):
+    secs = max(0, secs or 0)
+    label = fmt_label(secs)
+    if vid:
+        return f"## {link_ts(label, vid, secs)} {title}"
+    return f"## [{label}] {title}"
+
+
 def para_text(start, body, vid=None, link=False):
     label = fmt_label(start)
     head = link_ts(label, vid, start) if (link and vid) else f"[{label}]"

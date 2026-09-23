@@ -103,7 +103,10 @@ def test_collection_override_layout(run, home, fake):
 
 def test_srt_transcribed_has_no_timings(run, home, fake):
     run("-d", str(home / "o"), "-o", "s.md", "--lang", "en,tr", "--srt", "--transcribe", LIST)
-    assert not list((home / "o").glob("*.srt")) or True  # transcribed only if key path runs
+    names = [p.name for p in (home / "o").glob("*.srt")]
+    assert any("aaaaaaaaaaa" in n for n in names)  # subtitled videos keep timings
+    assert not any("ccccccccccc" in n for n in names)  # transcribed only: no timings
+    assert "transcribed sentence" in read(home / "o" / "s.md")
     import tube2note.config as cfg
     assert cfg.load_config()["last"]["transcribe"] is True
 

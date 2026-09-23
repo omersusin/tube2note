@@ -258,6 +258,34 @@ def _make_req(url):
         return urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
 
 
+def sponsor_ranges(vid, cats=("sponsor",), opener=None):
+    """SponsorBlock skip ranges [(start, end)]; fail-open [] on any error."""
+    try:
+        import urllib.parse
+        q = urllib.parse.quote(json.dumps(list(cats)))
+        req = _make_req(f"https://sponsor.ajay.app/api/skipSegments?videoID={vid}&categories={q}")
+        ctx = opener(req) if opener else urllib.request.urlopen(req, timeout=10)
+        with ctx as r:
+            data = json.loads(r.read().decode("utf-8", errors="ignore"))
+        out = []
+        for d in data or []:
+            try:
+                seg = d.get("segment") if isinstance(d, dict) else d
+                out.append((float(seg[0]), float(seg[1])))
+            except (TypeError, ValueError, IndexError, AttributeError):
+                continue
+        return out
+    except Exception:
+        return []
+
+
+def strip_sponsored(segs, ranges):
+    if not ranges:
+        return segs
+    return [(st, t) for st, t in (segs or [])
+            if not any(s <= st < e for s, e in ranges)]
+
+
 def fetch_vtt(formats, opener=None):
     """Try each format in order (vtt first). One dead mirror must not kill the video."""
     want = [f for f in (formats or []) if isinstance(f, dict) and f.get("url")] or []
@@ -290,6 +318,8 @@ def detect_langs(videos, probe=3, want=("tr", "en")):
             try:
                 info = ydl.extract_info(v["url"], download=False)
             except Exception:
+                continue
+            if not info:
                 continue
             for pool in (info.get("subtitles") or {}, info.get("automatic_captions") or {}):
                 for k, fmts in pool.items():

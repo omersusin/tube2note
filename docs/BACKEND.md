@@ -4,7 +4,16 @@ Pages serves HTML/CSS/JS. No Python, yt-dlp, ffmpeg, secrets, long jobs.
 Browsers block YouTube timedtext (CORS + IP-ban). So: Pages hosts docs,
 execution runs below. Never put keys in JS.
 
-## Deploy (Render free first, Fly fallback)
+## Deploy (Leapcell free first, Render fallback, Fly last)
+
+Leapcell (Hobby, no card): GitHub connect → Create Service → Python runtime,
+build `apt-get update && apt-get install -y ffmpeg && pip install -r
+requirements.txt` (needs `fastapi,uvicorn,yt-dlp` in requirements),
+start `uvicorn tube2note.server_api:app --host 0.0.0.0 --port 8080`,
+env `BACKEND_TOKEN=<secret>`, `OUT_DIR=/tmp/tube2note-out`,
+`BACKEND_MAX_JOBS=2`. Serverless: /tmp only, 15-min request cap, idle
+suspend — jobs must finish fast and frontend must keep polling /api/state.
+Open `*.leapcell.dev/healthz` to verify.
 
 Render: Blueprint `render.yaml` → set BACKEND_TOKEN. Free = ephemeral FS
 (no disk), sleeps 15min idle, 750h/mo. Transcripts vanish on sleep — download

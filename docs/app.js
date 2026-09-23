@@ -14,9 +14,12 @@ function payload() {
     lang: $("lang").value, layout: $("layout").value, max: +$("max").value || 100,
     since: $("since").value, timestamps: $("timestamps").checked, clean: $("clean").checked,
     link_timestamps: $("link_timestamps").checked, srt: $("srt").checked,
+    vtt: $("vtt").checked, anki: $("anki").checked, chapters: $("chapters").checked,
+    sponsorblock: $("sponsorblock").checked, cite: $("cite").checked, obsidian: $("obsidian").checked,
     transcribe: $("transcribe").checked, summarize: $("summarize").checked,
     translate: $("translate").value, bilingual: $("bilingual").value,
     pdf: $("pdf").checked, epub: $("epub").checked,
+    cookies: $("cookies").value, cookies_from_browser: $("cookies_from_browser").value,
     split_words: +$("split").value || 0, workers: +$("workers").value || 1};
 }
 function render(s) {

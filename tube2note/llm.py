@@ -112,6 +112,8 @@ def _summary_prompt(text, lang):
 
 def _translate_chunks(text, target, model, budget=4000):
     """Translate long text in ID-marked chunks so timing/structure survives."""
+    if not os.environ.get("GEMINI_API_KEY", ""):
+        raise SystemExit("Translate needs GEMINI_API_KEY (free at aistudio.google.com)")
     paras = [p for p in text.split("\n\n") if p.strip()]
     chunks, cur, n = [], [], 0
     for p in paras:

@@ -173,8 +173,11 @@ def test_tui_link_srt_plumbing(home, monkeypatch):
     monkeypatch.setattr(t, "expand", lambda urls, max_n, since=None: (
         [{"id": "aaaaaaaaaaa", "title": "A", "url": urls[0]}], "H"))
     monkeypatch.setattr(t, "detect_langs", lambda videos: ("en", []))
-    answers = iter(["https://www.youtube.com/watch?v=aaaaaaaaaaa", "", "", "", "", "",
-                    "", "", "n", "y", "y", "y", "n", "y", "tr", "", "n", "n", "", "", "", "", "q"])
+    # new flow: URL + out/lang/max (3) + Advanced gate, then advanced block, go, quit
+    answers = iter(["https://www.youtube.com/watch?v=aaaaaaaaaaa", "", "", "",
+                    "y", "", "", "", "", "",
+                    "y", "y", "n", "n", "n", "n", "y", "n", "y", "tr", "", "",
+                    "n", "n", "", "", "", "", "q"])
     monkeypatch.setattr("builtins.input", lambda *a: next(answers))
     got = {}
     monkeypatch.setattr(t, "run_job", lambda *a, **k: got.update(k) or {"ok": 1, "skipped": 0, "total": 1})

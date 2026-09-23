@@ -1,4 +1,5 @@
 """Watch mode: re-check channels/playlists, collect only new videos."""
+import glob
 import hashlib
 import json
 import os
@@ -31,7 +32,10 @@ def _load_seen(path):
 def _save_seen(path, seen):
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        json.dump({"seen": sorted(seen)}, open(path, "w", encoding="utf-8"))
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"seen": sorted(seen)}, f)
+        os.replace(tmp, path)  # atomic: readers never see a half-written state
     except OSError:
         pass
 
@@ -44,14 +48,52 @@ def _cache_base():
     return os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
 
 
-def _pid_path():
-    return os.path.join(_cache_base(), "tube2note", "watch.pid")
+def _pid_path(key=None, out=None):
+    base = os.path.join(_cache_base(), "tube2note")
+    if key is None and out is None:
+        legacy = os.path.join(base, "watch.pid")  # legacy: no-arg callers / old daemons
+        try:
+            pers = sorted(glob.glob(os.path.join(base, "watch-*.pid")))
+            if not os.path.exists(legacy) and len(pers) == 1:
+                return pers[0]  # no-arg callers follow the single per-set daemon
+        except OSError:
+            pass
+        return legacy
+    h = hashlib.sha256(repr((key, out)).encode()).hexdigest()[:16]
+    return os.path.join(base, f"watch-{h}.pid")
+
+
+def _watch_key(targets):
+    """Per-watch identity (hash of state paths): distinct subs/out sets get distinct pidfiles."""
+    parts = []
+    for sub, o, lang in targets:
+        url = sub.get("url") if isinstance(sub, dict) else str(sub)
+        try:
+            parts.append(_state_path([url], o or ""))
+        except Exception:
+            parts.append(f"{url}|{o}|{lang}")
+    return hashlib.sha256("\n".join(sorted(parts)).encode()).hexdigest()[:16]
+
+
+def _pid_candidates():
+    cands = [_pid_path()]
+    try:
+        cands += sorted(glob.glob(os.path.join(os.path.dirname(cands[0]), "watch-*.pid")))
+    except OSError:
+        pass
+    return list(dict.fromkeys(cands))
 
 
 def _read_pidfile(path):
     try:
         d = json.load(open(path, encoding="utf-8"))
-        if isinstance(d, dict) and isinstance(d.get("pid"), int):
+        if isinstance(d, dict):
+            try:
+                pid = int(str(d.get("pid")).strip())
+            except (ValueError, TypeError, AttributeError):
+                return {}
+            d = dict(d)
+            d["pid"] = pid
             return d
         return {"pid": int(str(d).strip())}  # legacy bare-int files
     except (OSError, ValueError, TypeError, AttributeError):
@@ -150,24 +192,30 @@ def _daemonize(logpath, pidpath):
     signal.signal(signal.SIGTERM, _on_term)
 
 
-def _cmd_stop():
-    p = _pid_path()
-    data = _read_pidfile(p)
+def _stop_one(path, quiet=False):
+    data = _read_pidfile(path)
     pid = data.get("pid")
     if not pid:
-        print("watch: not running (no PID file).")
+        if not quiet:
+            print("watch: not running (no PID file).")
         return 1
     if not _pid_is_alive(pid):
-        if _read_pidfile(p).get("pid") == pid:
-            _unlink_quiet(p)
+        if _read_pidfile(path).get("pid") == pid:
+            _unlink_quiet(path)
         print(f"watch: stale PID file removed (pid {pid} dead).")
         return 1
     if not _is_ours(pid):
-        if _read_pidfile(p).get("pid") == pid:
-            _unlink_quiet(p)
+        if _read_pidfile(path).get("pid") == pid:
+            _unlink_quiet(path)
         print(f"watch: stale PID file removed (pid {pid} reused by another process — NOT killed).")
         return 1
-    os.kill(pid, signal.SIGTERM)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        if _read_pidfile(path).get("pid") == pid:
+            _unlink_quiet(path)
+        print(f"watch: stale PID file removed (pid {pid} dead).")
+        return 1
     for _ in range(50):
         time.sleep(0.1)
         if not _pid_is_alive(pid):
@@ -175,34 +223,54 @@ def _cmd_stop():
     else:
         print(f"watch: pid {pid} ignoring SIGTERM; left running.")
         return 1
-    if _read_pidfile(p).get("pid") == pid:
-        _unlink_quiet(p)
+    if _read_pidfile(path).get("pid") == pid:
+        _unlink_quiet(path)
     print(f"watch: stopped (pid {pid}).")
     return 0
 
 
-def _check(urls, out, cfg, args):
+def _cmd_stop():
+    cands = [p for p in _pid_candidates() if os.path.exists(p)]
+    if not any(_read_pidfile(p).get("pid") for p in cands):
+        print("watch: not running (no PID file).")
+        return 1
+    code = 1
+    for p in cands:
+        if _read_pidfile(p).get("pid"):
+            code = _stop_one(p) and code  # 0 if any daemon stopped
+    return code
+
+
+def _check(urls, out, cfg, args, since=None):
     """One check: list fresh, run new videos, update seen. Returns exit code."""
     path = _state_path(urls, out)
     seen = _load_seen(path)
     try:
-        videos, _ = expand(urls, args.max, fresh=True)
+        if since:  # per-sub since; omitted when unset (keeps old expand mocks working)
+            videos, _ = expand(urls, args.max, since=since, fresh=True)
+        else:
+            videos, _ = expand(urls, args.max, fresh=True)
     except Exception as e:
         print(f"watch: listing failed ({e}), will retry next round.")
         return 2
-    if not videos:
+    if videos is None:
         print("watch: listing failed, will retry next round.")
         return 2
+    if not videos:
+        print("watch: no videos listed.")
+        return 0
     fresh = _new_videos(videos, seen)
     if not fresh:
         print(f"watch: no new videos ({len(videos)} listed, all seen).")
         return 0
-    print(f"watch: {len(fresh)} new video(s): " + ", ".join(v.get("title", v["id"])[:50] for v in fresh[:5]))
-    res = (run_job([v["url"] for v in fresh], out, cfg["lang"], len(fresh), args.sleep,
+    print(f"watch: {len(fresh)} new video(s): " + ", ".join(
+        (v.get("title") or v.get("id") or "?")[:50] for v in fresh[:5]))
+    urls_to_get = [v.get("url") for v in fresh if v.get("url")]
+    res = (run_job(urls_to_get, out, cfg["lang"], len(fresh), args.sleep,
                    False, cfg["chunk"], cfg["chunk_cooldown_min"] * 60, args.throttle_cooldown,
                    videos=fresh, outdir=cfg["outdir"], ts=cfg["timestamps"] or args.timestamps,
                    verbose=args.verbose, layout=cfg["layout"], template=cfg["template"],
-                   pdf=args.pdf, proxy=args.proxy, cookiefile=args.cookies,
+                   pdf=args.pdf, proxy=args.proxy, cookiefile=args.cookies, since=since,
                    clean=cfg["clean"], clean_level=cfg["clean_level"],
                    link_timestamps=args.link_timestamps, srt=args.srt) or {})
     # save seen ONLY on a clean run: partial runs retry next round (.done makes it cheap)
@@ -268,7 +336,8 @@ def cmd_watch(argv):
                 continue
             cfg = resolve_config({"outdir": a.dir, "layout": a.layout, "lang": lang,
                                   "clean": a.clean}, None)
-            code = _check([sub["url"]], out, cfg, a) or code
+            code = _check([sub["url"]], out, cfg, a,
+                          since=sub.get("since") if isinstance(sub, dict) else None) or code
         return code
 
     if a.daemon is not None:
@@ -278,21 +347,31 @@ def cmd_watch(argv):
             os.makedirs(os.path.dirname(logpath), exist_ok=True)
         except OSError as e:
             ap.error(f"cannot write log dir: {e}")
-        data = _read_pidfile(_pid_path())
+        pidpath = _pid_path(_watch_key(targets))
+        data = _read_pidfile(pidpath)
         old = data.get("pid")
         if old and _pid_is_alive(old) and _is_ours(old):
             print(f"watch: already running (pid {old}).")
             return 1
         if old:
-            _unlink_quiet(_pid_path())
+            _unlink_quiet(pidpath)
             print(f"watch: stale PID file removed (pid {old}).")
-        elif os.path.exists(_pid_path()):
-            _unlink_quiet(_pid_path())
+        elif os.path.exists(pidpath):
+            _unlink_quiet(pidpath)
             print("watch: stale PID file removed (unreadable).")
+        else:  # refuse if a legacy single-file daemon is still alive
+            _legacy = os.path.join(_cache_base(), "tube2note", "watch.pid")
+            lold = _read_pidfile(_legacy).get("pid")
+            if lold and _pid_is_alive(lold) and _is_ours(lold):
+                print(f"watch: already running (pid {lold}).")
+                return 1
+            if os.path.exists(_legacy):
+                _unlink_quiet(_legacy)
+                print("watch: stale PID file removed (legacy).")
         if a.verbose:
             print("watch: --verbose ignored in daemon mode (log uses quiet progress).", flush=True)
         a.verbose = False
-        _daemonize(logpath, _pid_path())
+        _daemonize(logpath, pidpath)
         print(f"watch: daemon running, interval {a.interval:g} min, log {logpath} "
               "(verbose off, dashboard off).", flush=True)
 

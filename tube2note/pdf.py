@@ -1,18 +1,26 @@
 """Markdown -> PDF export (optional fpdf2)."""
 import os
+import re
 
 
 def _md_line_kind(line):
     """Classify one markdown line for the PDF renderer (pure, testable)."""
     s = line.rstrip("\n")
-    if s.startswith("## "):
-        return ("h2", s[3:].strip())
-    if s.startswith("# "):
-        return ("h1", s[2:].strip())
+    ls = s.lstrip()
+    if ls.startswith("#### "):
+        return ("h3", ls[5:].strip())
+    if ls.startswith("### "):
+        return ("h3", ls[4:].strip())
+    if ls.startswith("## "):
+        return ("h2", ls[3:].strip())
+    if ls.startswith("# "):
+        return ("h1", ls[2:].strip())
     if s.strip() in ("---", "***"):
         return ("rule", "")
     if s.lstrip().startswith("- "):
         return ("bullet", s.lstrip()[2:].strip())
+    if re.match(r"^\s*\d+[.)]\s+\S", s):
+        return ("bullet", re.sub(r"^\s*\d+[.)]\s+", "", s).strip())
     if s.strip().startswith("|") and s.strip().endswith("|"):
         return ("row", "  ".join(c.strip() for c in s.strip().strip("|").split("|")))
     return ("para", s.strip())
@@ -68,26 +76,59 @@ def _has_cjk(lines):
                for ln in lines for ch in ln)
 
 
-def md_to_pdf(md_path, pdf_path=None):
+def md_to_pdf(md_path, pdf_path=None, meta=None, **kw):
     """Convert our Markdown to PDF. Needs fpdf2 (pip install fpdf2) — optional dep."""
     try:
         from fpdf import FPDF
         from fpdf.enums import XPos, YPos
     except ImportError:
         raise SystemExit("PDF needs fpdf2: pip install fpdf2  (or pip install tube2note[pdf])")
+    combined = dict(meta or {})
+    combined.update(kw)
     pdf_path = pdf_path or os.path.splitext(md_path)[0] + ".pdf"
-    pdf = FPDF()
+
+    class _PDF(FPDF):
+        _footfont = "helvetica"
+
+        def footer(self):
+            try:
+                self.set_y(-15)
+                try:
+                    self.set_font(self._footfont, "", 8)
+                except Exception:
+                    self.set_font("helvetica", "", 8)
+                self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", align="C")
+            except Exception:
+                pass
+
+    pdf = _PDF()
+    pdf.alias_nb_pages("{nb}")
     pdf.set_auto_page_break(True, margin=20)
     font, uni, bold_ok = _pdf_font(pdf)
+    pdf._footfont = font
     if not uni:
         print("warning: no Unicode font found — non-latin glyphs will be folded to ASCII", flush=True)
     try:
         with open(md_path, encoding="utf-8", errors="replace") as f:
-            lines = f.read().splitlines()
+            raw_text = f.read()
     except OSError:
         raise
     except Exception as e:
         raise OSError(f"cannot read {md_path}: {e}")
+    lines = raw_text.splitlines()
+    title = combined.get("title")
+    if not title:
+        m = re.search(r"^#\s+(.*)", raw_text, re.M)
+        title = m.group(1).strip() if m else os.path.splitext(os.path.basename(md_path))[0]
+    author = combined.get("channel", combined.get("creator", combined.get("author", "")))
+    if not author:
+        m = re.search(r'^channel:\s*"?(.*?)"?\s*$', raw_text, re.M | re.I)
+        author = m.group(1).strip().strip('"') if m else "tube2note"
+    try:
+        pdf.set_title(title)
+        pdf.set_author(author)
+    except Exception:
+        pass
     if uni and _has_cjk(lines) and not any(os.path.exists(p) for p in CJK_FONTS):
         print("warning: CJK text found but no CJK font installed "
               "(glyphs may render as blank boxes)", flush=True)
@@ -99,16 +140,31 @@ def md_to_pdf(md_path, pdf_path=None):
         pdf.set_font(font, st if (st != "B" or bold_ok) else "", s)
         pdf.multi_cell(0, h, t if uni else _fold_latin1(t),
                        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    seen_h2 = False
+    def _bm(text, level):
+        try:
+            pdf.start_section(text if uni else _fold_latin1(text), level=level, strict=False)
+        except Exception:
+            pass
     for raw in lines:
         if not raw.strip():
             pdf.ln(3)
             continue
         kind, text = _md_line_kind(raw)
         if kind == "h1":
+            _bm(text, 0)
             mc(8, text, 16, "B")
             pdf.set_font(font, size=11)
         elif kind == "h2":
+            if seen_h2:
+                pdf.add_page()
+            seen_h2 = True
+            _bm(text, 1)
             mc(7, text, 13, "B")
+            pdf.set_font(font, size=11)
+        elif kind == "h3":
+            _bm(text, 2)
+            mc(6, text, 12, "B")
             pdf.set_font(font, size=11)
         elif kind == "rule":
             pdf.ln(2)

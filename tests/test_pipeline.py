@@ -11,7 +11,7 @@ def read(p):
 def test_single_layout(run, home):
     out = run("-d", str(home / "o"), "-o", "s.md", "--lang", "en,tr", LIST)
     md = read(home / "o" / "s.md")
-    assert "## 1. Alpha talk" in md and "### Intro" in md
+    assert "## 1. Alpha talk" in md and "### Intro" not in md  # chapters gated behind --chapters
     assert "Hello and welcome to the show." in md      # filler "um" removed
     assert "Today we talk about testing." in md        # repeat collapsed
     assert "Merhaba arkadaşlar." in md                 # Turkish filler "ee" removed
@@ -164,7 +164,7 @@ def test_obsidian_frontmatter(run, home):
     run("-d", str(home / "o"), "-o", "b.md", "--layout", "videos", "--lang", "en,tr",
         "--obsidian", "https://www.youtube.com/playlist?list=PLfake")
     md = read(home / "o" / "videos" / "Alpha talk [aaaaaaaaaaa].md")
-    assert "tags: [youtube, transcript]" in md and "aliases:" in md
+    assert "tags: [youtube, transcript, youtube/channel/" in md and "aliases:" in md
 
 
 def test_cookies_from_browser_reaches_ydl(home, monkeypatch, fake):
@@ -261,3 +261,24 @@ def test_zip_bilingual_unit():
     assert _zip_bilingual("", "")[0] is False
     ok, b = _zip_bilingual("### Intro\nhello", "### Giris\nmerhaba")
     assert ok and "> ###" not in b
+
+
+def test_sponsorblock_pipeline_mocked(run, home, fake, monkeypatch):
+    import tube2note.source as src
+    monkeypatch.setattr(src, "sponsor_ranges",
+                        lambda vid, cats=("sponsor",): [(0, 5)] if vid == "aaaaaaaaaaa" else [])
+    run("-d", str(home / "o"), "-o", "s.md", "--lang", "en", "--sponsorblock", LIST)
+    md = read(home / "o" / "s.md")
+    assert "Hello and welcome" not in md  # mocked range stripped
+    assert "Today we talk about testing." in md and "Thanks for watching" in md
+    run("-d", str(home / "p"), "-o", "s.md", "--lang", "en", LIST)
+    assert "Hello and welcome" in read(home / "p" / "s.md")
+
+
+def test_cite_pipeline_bib_ris_content(run, home):
+    run("-d", str(home / "o"), "-o", "c.md", "--lang", "en,tr", "--cite", LIST)
+    bib_p, ris_p = home / "o" / "c.bib", home / "o" / "c.ris"
+    assert bib_p.exists() and ris_p.exists()
+    bib, ris = read(bib_p), read(ris_p)
+    assert "Alpha talk" in bib and "aaaaaaaaaaa" in bib and bib.count("@misc{") >= 3
+    assert "Alpha talk" in ris and "TY  - ELEC" in ris and "aaaaaaaaaaa" in read(home / "o" / "c.md")

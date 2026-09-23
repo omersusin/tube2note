@@ -18,6 +18,8 @@ from .ui import dim, green, panel, red, table
 
 YT_RE = re.compile(r"(youtube\.com/(watch|shorts|playlist|@|channel/|c/|user/|live|embed)|youtu\.be/|[?&](list|v)=)")
 
+KEY_NEED = "needs GEMINI_API_KEY (free at aistudio.google.com; core download is free)"
+
 
 def show_intro():
     print(panel("tube2note — YouTube to NotebookLM", [
@@ -123,18 +125,7 @@ def tui():
             ["Est. time", f"~{est:.0f} min paced" if est >= 1 else "<1 min"],
         ]))
         out = input(f"Output file [{guess}] > ").strip() or guess
-        lastdir = load_config().get("lastdir") or cfg["outdir"]
-        outdir = input(f"Folder [{lastdir}] > ").strip() or lastdir
-        try:
-            _st = load_config()
-            _st["lastdir"] = outdir
-            save_config(_st)
-        except OSError:
-            pass
-        lay = input(f"Layout (single/videos/tree) [{cfg['layout']}] > ").strip().lower() or cfg["layout"]
-        if lay not in ("single", "videos", "tree"):
-            print(f"Unknown layout '{lay}', using single.")
-            lay = "single"
+        print("Same name = resume where it stopped.")
         lang = input(f"Languages [{sug}] > ").strip() or sug
         mx = input(f"Max videos [{len(videos)}] > ").strip() or str(len(videos))
         try:
@@ -142,44 +133,70 @@ def tui():
         except ValueError:
             max_n = len(videos)
         videos = videos[:max_n]
-        ch = input(f"Chunk size [{cfg['chunk']}] > ").strip() or str(cfg["chunk"])
-        try:
-            ch = max(0, int(ch))
-        except ValueError:
-            ch = cfg["chunk"]
-        cd = input(f"Chunk break minutes [{cfg['chunk_cooldown_min']}] > ").strip() or str(cfg["chunk_cooldown_min"])
-        try:
-            chc = max(0, int(cd)) * 60
-        except ValueError:
-            chc = cfg["chunk_cooldown_min"] * 60
-        yn = "y" if cfg["timestamps"] else "n"
-        ts = input(f"Timestamps? [{yn}] > ").strip().lower()
-        ts = cfg["timestamps"] if ts == "" else ts in ("y", "yes")
-        lk = input("Clickable timestamp links? [n] > ").strip().lower() in ("y", "yes")
-        sr = input("Write .srt sidecars? [n] > ").strip().lower() in ("y", "yes")
-        tr = None
-        if input("Transcribe videos without captions (needs GEMINI_API_KEY)? [n] > ").strip().lower() in ("y", "yes"):
-            tr = "api"
-            if input("Use local whisper.cpp instead of Gemini API? [n] > ").strip().lower() in ("y", "yes"):
-                tr = "local"
-        sm = input("Summarize each video (needs GEMINI_API_KEY)? [n] > ").strip().lower() in ("y", "yes")
-        tl = input("Translate transcripts to (lang code, empty=off) [] > ").strip() or None
-        cl = input(f"Cleaning? [{'y' if cfg['clean'] else 'n'}] > ").strip().lower()
-        cl = cfg["clean"] if cl == "" else cl in ("y", "yes")
-        pdf = input("PDF too? [n] > ").strip().lower() in ("y", "yes")
-        ep = input("EPUB too? [n] > ").strip().lower() in ("y", "yes")
-        tmp = input(f"Name template [{cfg['template'] or 'layout default'}] > ").strip()
-        tmp = tmp or cfg["template"]
-        wk = input("Workers [1] > ").strip() or "1"
-        try:
-            wk = min(4, max(1, int(wk)))
-        except ValueError:
-            wk = 1
-        sp = input("Auto-split words for NotebookLM [0=off] > ").strip() or "0"
-        try:
-            sp = max(0, int(sp))
-        except ValueError:
-            sp = 0
+        lastdir = os.environ.get("YT2MD_OUTDIR") or load_config().get("lastdir") or cfg["outdir"]
+        if input("Advanced options? [n] > ").strip().lower() not in ("y", "yes"):
+            outdir, lay, ch, chc = lastdir, cfg["layout"], cfg["chunk"], cfg["chunk_cooldown_min"] * 60
+            ts, lk, sr, tr, sm, tl, bi = cfg["timestamps"], False, False, None, False, None, None
+            cl, pdf, ep, tmp, wk, sp = cfg["clean"], False, False, cfg["template"], 1, 0
+            chap, cit, vv, sb = False, False, False, False
+        else:
+            outdir = input(f"Folder [{lastdir}] > ").strip() or lastdir
+            try:
+                _st = load_config()
+                _st["lastdir"] = outdir
+                save_config(_st)
+            except OSError:
+                pass
+            lay = input(f"Layout (single/videos/tree) [{cfg['layout']}] > ").strip().lower() or cfg["layout"]
+            if lay not in ("single", "videos", "tree"):
+                print(f"Unknown layout '{lay}', using single.")
+                lay = "single"
+            ch = input(f"Chunk size [{cfg['chunk']}] > ").strip() or str(cfg["chunk"])
+            try:
+                ch = max(0, int(ch))
+            except ValueError:
+                ch = cfg["chunk"]
+            cd = input(f"Chunk break minutes [{cfg['chunk_cooldown_min']}] > ").strip() or str(cfg["chunk_cooldown_min"])
+            try:
+                chc = max(0, int(cd)) * 60
+            except ValueError:
+                chc = cfg["chunk_cooldown_min"] * 60
+            yn = "y" if cfg["timestamps"] else "n"
+            ts = input(f"Timestamps? [{yn}] > ").strip().lower()
+            ts = cfg["timestamps"] if ts == "" else ts in ("y", "yes")
+            lk = input("Clickable timestamp links? [n] > ").strip().lower() in ("y", "yes")
+            sr = input("Write .srt sidecars? [n] > ").strip().lower() in ("y", "yes")
+            chap = input("Chapters (silent if video has no chapters)? [n] > ").strip().lower() in ("y", "yes")
+            cit = input("Citations (cite)? [n] > ").strip().lower() in ("y", "yes")
+            vv = input("Write .vtt sidecars? [n] > ").strip().lower() in ("y", "yes")
+            sb = input("Skip sponsors (sponsorblock)? [n] > ").strip().lower() in ("y", "yes")
+            tr = None
+            if input(f"Transcribe videos without captions ({KEY_NEED})? [n] > ").strip().lower() in ("y", "yes"):
+                tr = "api"
+                if input("Use local whisper.cpp instead of Gemini API? [n] > ").strip().lower() in ("y", "yes"):
+                    tr = "local"
+            sm = input(f"Summarize each video ({KEY_NEED})? [n] > ").strip().lower() in ("y", "yes")
+            tl = input(f"Translate transcripts to (lang code, empty=off, {KEY_NEED}) [] > ").strip() or None
+            bi = input(f"Bilingual source+translation (lang code, empty=off, {KEY_NEED}) [] > ").strip() or None
+            if tl and bi:
+                print("Translate and bilingual are mutually exclusive, using translate.")
+                bi = None
+            cl = input(f"Cleaning? [{'y' if cfg['clean'] else 'n'}] > ").strip().lower()
+            cl = cfg["clean"] if cl == "" else cl in ("y", "yes")
+            pdf = input("PDF too? [n] > ").strip().lower() in ("y", "yes")
+            ep = input("EPUB too? [n] > ").strip().lower() in ("y", "yes")
+            tmp = input(f"Name template [{cfg['template'] or 'layout default'}] > ").strip()
+            tmp = tmp or cfg["template"]
+            wk = input("Workers [1] > ").strip() or "1"
+            try:
+                wk = min(4, max(1, int(wk)))
+            except ValueError:
+                wk = 1
+            sp = input("Auto-split words for NotebookLM [0=off] > ").strip() or "0"
+            try:
+                sp = max(0, int(sp))
+            except ValueError:
+                sp = 0
         print(f"\n{len(videos)} videos, output: {outdir}/{out}, langs: {lang}, layout: {lay}, "
               f"chunk: {ch}/{chc // 60}min, timestamps: {ts}, template: {tmp or 'default'}, split: {sp or 'off'}")
         go = input("[Enter]=start, q=cancel > ").strip()
@@ -189,9 +206,10 @@ def tui():
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
                     layout=lay, template=tmp, pdf=pdf, epub=ep, since=since, profile=prof, workers=wk,
                     clean=cl, clean_level=cfg["clean_level"],
-                    link_timestamps=lk, srt=sr,
+                    link_timestamps=lk, srt=sr, vtt=vv,
+                    chapters=chap, sponsorblock=sb, cite=cit,
                     transcribe=tr is not None, engine=tr or "api",
-                    summarize=sm, translate=tl)
+                    summarize=sm, translate=tl, bilingual=bi)
         except KeyboardInterrupt:
             print("\nCancelled.")
         again = input("\nNew job? [Enter]=yes, q=quit > ").strip()

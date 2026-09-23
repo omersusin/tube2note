@@ -204,6 +204,8 @@ For enthusiasts and developers. Not needed for normal use.
 
 **Obsidian users:** `--obsidian --layout videos` adds tags + aliases to notes.
 
+**Enrich output:** `--vtt` (.vtt sidecars), `--anki` (flashcards from summaries, needs `--summarize`), `--chapters` (group transcript by video chapters), `--sponsorblock` (skip sponsor segments), `--cite` (APA/MLA/Chicago/BibTeX/RIS citations).
+
 **Automation:** `tube2note status folder --json`, exit codes (0 = ok, 1 = partial, 2 = fatal), `YT2MD_*` env vars, profiles in `~/.config/yt2md/config.json`.
 
 **Developers:** `import tube2note.api` (collect/list/status), `tube2note mcp` (Claude/AI assistant link), `tube2note serve-api` (site backend, FastAPI). Dev setup: `pip install -e ".[dev]" && pytest && ruff check`. Version tags (`v*`) auto-publish to PyPI.

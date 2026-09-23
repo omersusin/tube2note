@@ -21,13 +21,17 @@ CONFIG_PATH = os.path.expanduser("~/.config/yt2md/config.json")
 
 DEFAULTS = {"outdir": ".", "layout": "single", "timestamps": False, "chunk": 50,
             "chunk_cooldown_min": 10, "lang": "tr,en", "template": "", "clean": True,
-            "clean_level": "full"}
+            "clean_level": "full", "vtt": False, "anki": False, "chapters": False,
+            "sponsorblock": False, "cite": False, "whisper_model": "tiny"}
 
 
 ENV_MAP = {"outdir": "YT2MD_OUTDIR", "layout": "YT2MD_LAYOUT", "lang": "YT2MD_LANG",
            "chunk": "YT2MD_CHUNK", "timestamps": "YT2MD_TIMESTAMPS",
            "chunk_cooldown_min": "YT2MD_COOLDOWN_MIN", "template": "YT2MD_TEMPLATE",
-           "clean": "YT2MD_CLEAN", "clean_level": "YT2MD_CLEAN_LEVEL"}
+           "clean": "YT2MD_CLEAN", "clean_level": "YT2MD_CLEAN_LEVEL",
+           "vtt": "YT2MD_VTT", "anki": "YT2MD_ANKI", "chapters": "YT2MD_CHAPTERS",
+           "sponsorblock": "YT2MD_SPONSORBLOCK", "cite": "YT2MD_CITE",
+           "whisper_model": "YT2MD_WHISPER_MODEL"}
 
 
 def load_config():
@@ -79,9 +83,11 @@ def _merge(base, store, profile, flags, env):
             cfg[key] = max(0, int(cfg[key]))
         except (ValueError, TypeError):
             cfg[key] = base[key]
-    for key in ("timestamps", "clean"):
+    for key in ("timestamps", "clean", "vtt", "anki", "chapters", "sponsorblock", "cite"):
         if isinstance(cfg.get(key), str):
             cfg[key] = cfg[key].lower() in ("1", "y", "yes", "true")
+    if cfg.get("whisper_model") not in ("tiny", "base"):
+        cfg["whisper_model"] = base["whisper_model"]
     if cfg.get("layout") not in ("single", "videos", "tree"):
         cfg["layout"] = base["layout"]
     if cfg.get("clean_level") not in ("light", "full"):

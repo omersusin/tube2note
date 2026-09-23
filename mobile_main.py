@@ -11,6 +11,8 @@ import flet as ft
 
 import tube2note.api as api
 
+KEY_NEED = "needs GEMINI_API_KEY (free at aistudio.google.com; core download is free)"
+
 
 def _diag():
     """One-line startup diagnostics (decides storage/SSL questions on device)."""
@@ -90,10 +92,13 @@ def main(page: ft.Page):
     clean = ft.Checkbox(label="Clean transcripts", value=True)
     pdf = ft.Checkbox(label="Also write PDF", value=False)
     epub = ft.Checkbox(label="Also write EPUB", value=False)
-    tr_summarize = ft.Checkbox(label="Summarize each video (needs key)", value=False)
-    tr_transcribe = ft.Checkbox(label="Transcribe videos without captions (needs key)", value=False)
-    tr_translate = ft.TextField(label="Translate to (e.g. tr, empty=off)", width=220, expand=True)
-    gemini_key = ft.TextField(label="GEMINI_API_KEY (free at aistudio.google.com)", password=True,
+    tr_summarize = ft.Checkbox(label=f"Summarize each video ({KEY_NEED})", value=False)
+    tr_transcribe = ft.Checkbox(label=f"Transcribe videos without captions ({KEY_NEED})", value=False)
+    tr_translate = ft.TextField(label=f"Translate to (e.g. tr, empty=off, {KEY_NEED})", width=220, expand=True)
+    tr_bilingual = ft.TextField(label=f"Bilingual source+translation (e.g. tr, empty=off, {KEY_NEED})",
+                                width=220, expand=True)
+    gemini_key = ft.TextField(label="GEMINI_API_KEY (free at aistudio.google.com; core download is free)",
+                              password=True,
                               can_reveal_password=True, expand=True)
     log = ft.Text("", selectable=True, font_family="monospace")
     bar = ft.ProgressBar(visible=False, expand=True)
@@ -189,9 +194,18 @@ def main(page: ft.Page):
         if (gemini_key.value or "").strip():
             os.environ["GEMINI_API_KEY"] = gemini_key.value.strip()
         ai = {"transcribe": bool(tr_transcribe.value), "summarize": bool(tr_summarize.value),
-              "translate": (tr_translate.value or "").strip() or None}
-        if (ai["transcribe"] or ai["summarize"] or ai["translate"]) and not os.environ.get("GEMINI_API_KEY"):
-            log.value = "AI needs a GEMINI_API_KEY (free at aistudio.google.com) — paste it above."
+              "translate": (tr_translate.value or "").strip() or None,
+              "bilingual": (tr_bilingual.value or "").strip() or None}
+        if ai["translate"] and ai["bilingual"]:
+            log.value = "Translate and bilingual are mutually exclusive — pick one."
+            go.disabled = False
+            preview.disabled = False
+            bar.visible = False
+            page.update()
+            return
+        if (ai["transcribe"] or ai["summarize"] or ai["translate"] or ai["bilingual"]) \
+                and not os.environ.get("GEMINI_API_KEY"):
+            log.value = f"AI {KEY_NEED} — paste it above."
             go.disabled = False
             preview.disabled = False
             bar.visible = False
@@ -271,7 +285,7 @@ def main(page: ft.Page):
                 _section("AI (needs key)"),
                 _card(
                     tr_transcribe, tr_summarize,
-                    tr_translate,
+                    tr_translate, tr_bilingual,
                     gemini_key,
                 ),
                 _section("ACTIONS"),

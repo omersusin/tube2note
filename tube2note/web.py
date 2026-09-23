@@ -49,6 +49,15 @@ def gemini_available():
     return bool(os.environ.get("GEMINI_API_KEY"))
 
 
+_HINT_RE = re.compile(r"sign in|log in|cookie|bot|429|too many|private|age.?gate|unavailable|forbidden|login", re.I)
+_HINT = " Next: try Preview (dry-run), run `tube2note doctor`, or set --cookies / --cookies-from-browser."
+
+
+def with_hint(msg):
+    msg = str(msg or "")
+    return msg + _HINT if msg and _HINT_RE.search(msg) and _HINT not in msg else msg
+
+
 # --------------------------------------------------------------------------- request -> argv
 
 def _bool(v):
@@ -119,6 +128,28 @@ def build_argv(p, base_dir, python=None):
         argv.append("--link-timestamps")
     if _bool(p.get("srt")):
         argv.append("--srt")
+    if _bool(p.get("vtt")):
+        argv.append("--vtt")
+    if _bool(p.get("anki")):
+        argv.append("--anki")
+    if _bool(p.get("chapters")):
+        argv.append("--chapters")
+    if _bool(p.get("sponsorblock")):
+        argv.append("--sponsorblock")
+    if _bool(p.get("cite")):
+        argv.append("--cite")
+    if _bool(p.get("obsidian")):
+        argv.append("--obsidian")
+    cookies = str(p.get("cookies") or "").strip()
+    if cookies:
+        if "\x00" in cookies:
+            raise ValueError("Bad cookies path")
+        argv += ["--cookies", cookies]
+    cfb = str(p.get("cookies_from_browser") or p.get("cookies-from-browser") or "").strip()
+    if cfb:
+        if "\x00" in cfb or len(cfb) > 120:
+            raise ValueError("Bad cookies-from-browser value")
+        argv += ["--cookies-from-browser", cfb]
     if p.get("clean") is not None and not _bool(p.get("clean")):
         argv.append("--no-clean")
     split = _int(p.get("split_words"), 0, 500000, 0, "Split words")
@@ -465,9 +496,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 self.app.start(payload)
             except ValueError as e:
-                return self._err(400, str(e))
+                return self._err(400, with_hint(str(e)))
             except RuntimeError as e:
-                return self._err(409, str(e))
+                return self._err(409, with_hint(str(e)))
             return self._json(200, self.app.state())
         if path == "/api/stop":
             self.app.stop()
@@ -621,17 +652,25 @@ pre{background:var(--code);color:var(--codefg);border:1px solid var(--line);bord
 <div><label for="name">Output name (empty = video title)</label><input type="text" id="name" value="" placeholder="auto (video title)" autocapitalize="off"></div>
 <div><label for="lang">Languages</label><input type="text" id="lang" placeholder="en or tr,en" autocapitalize="off"></div>
 </div>
+<p class="hint">Same name resumes where it stopped.</p>
 <p class="group-label">Transcript</p>
 <div class="checks">
 <label class="chk"><input type="checkbox" id="timestamps"> Keep [MM:SS] timestamps</label>
 <label class="chk"><input type="checkbox" id="link_timestamps"> Clickable timestamp links</label>
 <label class="chk"><input type="checkbox" id="srt"> Write .srt sidecars</label>
+<label class="chk"><input type="checkbox" id="vtt"> Write .vtt sidecars</label>
+<label class="chk"><input type="checkbox" id="chapters"> Group by chapters</label>
+<label class="chk"><input type="checkbox" id="sponsorblock"> Skip sponsors</label>
 <label class="chk"><input type="checkbox" id="clean" checked> Clean transcripts</label>
 </div>
 <p class="group-label">Files</p>
 <div class="checks">
 <label class="chk" id="pdfrow"><input type="checkbox" id="pdf"> Also write PDF</label>
+<p class="hint" id="pdfwhy" hidden></p>
 <label class="chk"><input type="checkbox" id="epub"> Also write EPUB</label>
+<label class="chk"><input type="checkbox" id="anki"> Anki flashcards</label>
+<label class="chk"><input type="checkbox" id="cite"> Append citations</label>
+<label class="chk"><input type="checkbox" id="obsidian"> Obsidian tags</label>
 </div>
 <details><summary>More options</summary>
 <div class="row">
@@ -640,8 +679,11 @@ pre{background:var(--code);color:var(--codefg);border:1px solid var(--line);bord
 <div><label for="since">Since (date)</label><input type="date" id="since"></div>
 <div><label for="split_words">Split every N words</label><input type="number" id="split_words" value="0" min="0" inputmode="numeric"></div>
 <div><label for="workers">Parallel workers (1 = safest)</label><input type="number" id="workers" value="1" min="1" max="4" inputmode="numeric"></div>
+<div><label for="cookies">Cookies file (optional)</label><input type="text" id="cookies" placeholder="path/to/cookies.txt" autocapitalize="off"></div>
+<div><label for="cookies_from_browser">Cookies from browser (optional)</label><input type="text" id="cookies_from_browser" placeholder="chrome" autocapitalize="off"></div>
 </div></details>
-<div id="gem" hidden><details open><summary>Gemini (uses GEMINI_API_KEY from the server)</summary>
+<div id="gem"><details open><summary>Gemini (uses GEMINI_API_KEY from the server)</summary>
+<p class="hint" id="gemwhy" hidden></p>
 <div class="checks">
 <label class="chk"><input type="checkbox" id="summarize"> Summarize each video</label>
 <label class="chk"><input type="checkbox" id="transcribe"> Transcribe videos without captions</label>
@@ -668,8 +710,8 @@ pre{background:var(--code);color:var(--codefg);border:1px solid var(--line);bord
 </div></div>
 <script nonce="__NONCE__">
 const $=id=>document.getElementById(id);
-const FIELDS=["urls","name","lang","layout","max","since","split_words","workers","translate","bilingual"];
-const BOOLS=["timestamps","link_timestamps","srt","clean","pdf","epub","summarize","transcribe"];
+const FIELDS=["urls","name","lang","layout","max","since","split_words","workers","translate","bilingual","cookies","cookies_from_browser"];
+const BOOLS=["timestamps","link_timestamps","srt","vtt","chapters","sponsorblock","clean","pdf","epub","anki","cite","obsidian","summarize","transcribe"];
 let busy=false,timer=null,seeded=false;
 function save(){try{const o={};FIELDS.forEach(f=>o[f]=$(f).value);BOOLS.forEach(f=>o[f]=$(f).checked);localStorage.setItem("t2n",JSON.stringify(o))}catch(e){}}
 function load(){try{const o=JSON.parse(localStorage.getItem("t2n")||"null");if(!o)return false;FIELDS.forEach(f=>{if(o[f]!=null)$(f).value=o[f]});BOOLS.forEach(f=>{if(o[f]!=null)$(f).checked=o[f]});return true}catch(e){return false}}
@@ -677,9 +719,13 @@ function payload(dry){const p={dry_run:dry};FIELDS.forEach(f=>p[f]=$(f).value);B
 async function api(path,body){const r=await fetch(path,body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||("HTTP "+r.status));return j}
 function fmtSize(n){return n>1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB"}
 function fmtTime(s){return Math.floor(s/60)+"m "+String(s%60).padStart(2,"0")+"s"}
+function hint(m){m=String(m||"");if(/sign in|log in|cookie|bot|429|too many|private|age.?gate|unavailable|forbidden/i.test(m)&&m.indexOf("Next:")<0)return m+" Next: try Preview (dry-run), run `tube2note doctor`, or set --cookies / --cookies-from-browser.";return m}
 function render(s){
   $("ver").textContent="v"+s.version;$("dir").textContent=s.base_dir;
-  $("gem").hidden=!s.gemini;$("pdfrow").hidden=!s.pdf;
+  const hasG=!!s.gemini,hasP=!!s.pdf;
+  ["summarize","transcribe","translate","bilingual"].forEach(f=>{$(f).disabled=!hasG});
+  $("gemwhy").hidden=hasG;$("gemwhy").textContent=hasG?"":"AI needs GEMINI_API_KEY on the server (free at aistudio.google.com; core download is free).";
+  $("pdf").disabled=!hasP;$("pdfwhy").hidden=hasP;$("pdfwhy").textContent=hasP?"":"PDF needs fpdf2 (pip install fpdf2).";
   if(!seeded){seeded=true;if(!load()){const d=s.defaults||{};if(d.lang)$("lang").value=d.lang;if(d.layout)$("layout").value=d.layout;$("timestamps").checked=!!d.timestamps;$("clean").checked=d.clean!==false}}
   busy=s.running;$("start").hidden=$("preview").hidden=busy;$("stop").hidden=!busy;
   const j=s.job;$("jobcard").hidden=!j;
@@ -697,11 +743,11 @@ function render(s){
     if(f.path.endsWith(".md")){const v=document.createElement("a");v.href=href+"?view=1";v.target="_blank";v.rel="noopener";v.textContent="View";right.appendChild(v)}
     const d=document.createElement("a");d.href=href;d.textContent="Download";right.appendChild(d);row.append(left,right);box.appendChild(row)});
 }
-async function poll(){clearTimeout(timer);let s;try{s=await api("/api/state");render(s)}catch(e){$("err").textContent=e.message}
+async function poll(){clearTimeout(timer);let s;try{s=await api("/api/state");render(s)}catch(e){$("err").textContent=hint(e.message)}
   timer=setTimeout(poll,s&&s.running?1500:6000)}
-async function go(dry){$("err").textContent="";save();try{render(await api("/api/start",payload(dry)));poll()}catch(e){$("err").textContent=e.message}}
+async function go(dry){$("err").textContent="";save();try{render(await api("/api/start",payload(dry)));poll()}catch(e){$("err").textContent=hint(e.message)}}
 $("start").onclick=()=>go(false);$("preview").onclick=()=>go(true);
-$("stop").onclick=async()=>{try{render(await api("/api/stop",{}));poll()}catch(e){$("err").textContent=e.message}};
+$("stop").onclick=async()=>{try{render(await api("/api/stop",{}));poll()}catch(e){$("err").textContent=hint(e.message)}};
 document.addEventListener("change",save);poll();
 </script></body></html>
 """

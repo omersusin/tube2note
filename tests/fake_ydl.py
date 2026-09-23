@@ -82,6 +82,8 @@ class FakeYDL:
 
 def fake_urlopen(req, timeout=0):
     url = getattr(req, "full_url", str(req))
+    if "sponsor.ajay.app" in url or "skipSegments" in url:
+        return _Resp(b"[]")
     if "generativelanguage.googleapis.com" not in url:
         return _real_urlopen(req, timeout=timeout)
     parts = json.loads(req.data)["contents"][0]["parts"]
@@ -96,6 +98,10 @@ def fake_urlopen(req, timeout=0):
         else:
             text = "SUMMARY of the video."
     return _Resp(json.dumps({"candidates": [{"content": {"parts": [{"text": text}]}}]}).encode())
+
+
+def _fake_sponsor_ranges(vid, cats=("sponsor",)):
+    return []
 
 
 def install(mp=None, extra_videos=None):
@@ -113,6 +119,11 @@ def install(mp=None, extra_videos=None):
             put(mod, "YoutubeDL", FakeYDL)
     put(urllib.request, "urlopen", fake_urlopen)
     put(time, "sleep", lambda s: None)
+    try:
+        import tube2note.source as _src
+        put(_src, "sponsor_ranges", _fake_sponsor_ranges)
+    except Exception:
+        pass
     if mp:
         mp.setenv("GEMINI_API_KEY", "fake-key")
     else:

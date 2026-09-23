@@ -2,6 +2,8 @@
 import html
 import re
 
+from .links import chapter_heading
+
 TAG_RE = re.compile(r"<(?:/?[A-Za-z][^>]*|\d[^>]*)>")
 
 
@@ -86,10 +88,10 @@ def _para_text(p, ts):
     return f"[{_fmt_ts(p[0][0])}] {body}" if ts else body
 
 
-def _join_paras(segs, ts=False, chapters=None):
+def _join_paras(segs, ts=False, chapters=None, vid=None, link_chapters=False):
     """Group segments into ~20-line paragraphs, or at the video's own chapter boundaries."""
     if chapters:
-        ch = sorted(chapters)
+        ch = sorted(chapters, key=lambda c: c[0])
         buckets, idx = [[] for _ in ch], 0
         for st, ln in segs:
             while idx + 1 < len(ch) and st >= ch[idx + 1][0]:
@@ -99,7 +101,10 @@ def _join_paras(segs, ts=False, chapters=None):
         for (st0, title), b in zip(ch, buckets):
             if not b:
                 continue
-            out.append(f"### {title}")
+            if link_chapters and vid:
+                out.append(chapter_heading(title, vid, st0))
+            else:
+                out.append(f"### {title}")
             out += [_para_text(b[i:i + 20], ts) for i in range(0, len(b), 20)]
         return "\n\n".join(out)
     paras, buf = [], []

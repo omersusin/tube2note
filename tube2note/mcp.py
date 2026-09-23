@@ -9,6 +9,7 @@ import json
 import sys
 
 from . import __version__
+from .naming import sanitize_filename
 
 TOOLS = [
     {"name": "download",
@@ -24,11 +25,19 @@ TOOLS = [
                          "summarize": {"type": "boolean", "description": "needs GEMINI_API_KEY"},
                          "translate": {"type": "string", "description": "target lang, needs GEMINI_API_KEY"},
                          "bilingual": {"type": "string", "description": "interleaved source+translation, needs GEMINI_API_KEY"},
-                         "link_timestamps": {"type": "boolean", "description": "clickable timestamp links"},
-                         "srt": {"type": "boolean", "description": "write .srt sidecar per video"},
-                         "epub": {"type": "boolean", "description": "write EPUB next to the Markdown"},
-                         "obsidian": {"type": "boolean", "description": "Obsidian tags+aliases"},
-                         "cookies_from_browser": {"type": "string", "description": "e.g. chrome"}},
+                          "link_timestamps": {"type": "boolean", "description": "clickable timestamp links"},
+                          "srt": {"type": "boolean", "description": "write .srt sidecar per video"},
+                          "vtt": {"type": "boolean", "description": "write .vtt sidecar per video"},
+                          "anki": {"type": "boolean", "description": "write Anki deck"},
+                          "chapters": {"type": "boolean", "description": "include chapters"},
+                          "sponsorblock": {"type": "boolean", "description": "skip sponsor segments"},
+                          "cite": {"type": "boolean", "description": "add citations"},
+                          "transcribe": {"type": "boolean", "description": "transcribe captionless videos, needs GEMINI_API_KEY"},
+                          "engine": {"type": "string", "enum": ["api", "local"], "description": "transcribe engine"},
+                          "gemini_model": {"type": "string", "description": "Gemini model override"},
+                          "epub": {"type": "boolean", "description": "write EPUB next to the Markdown"},
+                          "obsidian": {"type": "boolean", "description": "Obsidian tags+aliases"},
+                          "cookies_from_browser": {"type": "string", "description": "e.g. chrome"}},
                      "required": ["url"]}},
     {"name": "status",
      "description": "Collection progress (done/skipped counts) for a folder.",
@@ -68,12 +77,16 @@ def _call(name, args):
             raise ValueError("out must be a string")
         from .config import resolve_config
         from .job import _exit_code, run_job
+        from .llm import _GEMINI_MODEL
         with contextlib.redirect_stdout(io.StringIO()):
             cfg = resolve_config({"outdir": args.get("outdir"), "layout": args.get("layout"),
                                   "lang": args.get("lang")}, None)
+        out = sanitize_filename(args.get("out") or "tube2note.md") or "tube2note.md"
+        if not out.lower().endswith(".md"):
+            out += ".md"
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):  # progress bars must not corrupt the RPC stream
-            res = run_job([args["url"]], args.get("out") or "tube2note.md", cfg["lang"],
+            res = run_job([args["url"]], out, cfg["lang"],
                           _coerce_int(args.get("max"), 100, "max"), 2.0,
                           outdir=cfg["outdir"], layout=cfg["layout"],
                           summarize=bool(args.get("summarize")),
@@ -81,7 +94,14 @@ def _call(name, args):
                           link_timestamps=bool(args.get("link_timestamps")),
                           srt=bool(args.get("srt")), epub=bool(args.get("epub")),
                           obsidian=bool(args.get("obsidian")),
-                          cookies_from_browser=args.get("cookies_from_browser"))
+                          cookies_from_browser=args.get("cookies_from_browser"),
+                          transcribe=bool(args.get("transcribe")),
+                          engine=args.get("engine") or "api",
+                          gemini_model=args.get("gemini_model") or _GEMINI_MODEL,
+                          vtt=bool(args.get("vtt")), anki=bool(args.get("anki")),
+                          chapters=bool(args.get("chapters")),
+                          sponsorblock=bool(args.get("sponsorblock")),
+                          cite=bool(args.get("cite")))
         tail = "\n".join(buf.getvalue().splitlines()[-5:])
         return _text(f"exit={_exit_code(res)}\n{tail}")
     if name == "status":

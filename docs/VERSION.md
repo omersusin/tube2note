@@ -1,4 +1,7 @@
-[![version v0.17.1](https://img.shields.io/badge/version-v0.17.1-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.17.1)
+[![version v0.18.0](https://img.shields.io/badge/version-v0.18.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.18.0)
+
+## v0.17.1
+c040396 0.17.1: recovered agent fixes (mobile/server/vtt/throttle/store/mcp/docs)
 
 ## v0.17.0
 ec41884 0.17.0: swarm hardening round (10 agents, recovered)

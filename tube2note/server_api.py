@@ -3,6 +3,7 @@ Run: BACKEND_TOKEN=secret OUT_DIR=/tmp python -m tube2note.server_api
 Needs: pip install fastapi uvicorn (backend only, core stays stdlib).
 Render free = ephemeral FS (no disk). Fly needs 512MB (see fly.toml).
 """
+import asyncio
 import json
 import os
 import secrets
@@ -30,6 +31,7 @@ try:
 except (TypeError, ValueError):
     MAX_JOBS = 4  # global cap: no fork-bombs via spoofed IP headers
 MAX_JOBS_ENTRIES = 128  # total entries cap: dict-flood guard
+_JOBS_LOCK = asyncio.Lock()
 
 
 def _prune_jobs(now):
@@ -91,38 +93,41 @@ async def start(req: Request, x_token: Optional[str] = Header(None)):
     if not isinstance(p, dict):
         raise HTTPException(400, "JSON body must be an object")
     urls = p.get("urls") or []
-    if isinstance(urls, str):
-        urls = urls.split()
+    if not isinstance(urls, list):
+        raise HTTPException(400, "urls must be a list")
     if not urls or len(urls) > 50 or any(not _ok(u) for u in urls):
         raise HTTPException(400, "need 1-50 youtube.com/youtu.be urls")
     ip = _ip(req)
     now = time.time()
-    _prune_jobs(now)
-    if _live(JOBS.get(ip)):
-        raise HTTPException(409, "job already running")
-    live = sum(1 for j in JOBS.values() if _live(j))
-    if live >= MAX_JOBS:
-        raise HTTPException(503, "server busy, try again later")
     try:
         argv = build_argv(p, BASE)
     except ValueError as e:
         raise HTTPException(400, str(e))
     os.makedirs(BASE, exist_ok=True)
-    JOBS[ip] = (Job(argv, argv[argv.index("-o") + 1], "--dry-run" in argv), now)
+    async with _JOBS_LOCK:
+        _prune_jobs(now)
+        if _live(JOBS.get(ip)):
+            raise HTTPException(409, "job already running")
+        live = sum(1 for j in JOBS.values() if _live(j))
+        if live >= MAX_JOBS:
+            raise HTTPException(503, "server busy, try again later")
+        JOBS[ip] = (Job(argv, argv[argv.index("-o") + 1], "--dry-run" in argv), now)
     return {"ok": True}
 
 @app.post("/api/stop")
 async def stop(req: Request, x_token: Optional[str] = Header(None)):
     _auth(x_token)
-    j = JOBS.get(_ip(req))
+    async with _JOBS_LOCK:
+        j = JOBS.get(_ip(req))
     if j:
         j[0].stop()
     return {"ok": True}
 
 @app.get("/api/state")
-def state(req: Request, x_token: Optional[str] = Header(None)):
+async def state(req: Request, x_token: Optional[str] = Header(None)):
     _auth(x_token)
-    j = JOBS.get(_ip(req))
+    async with _JOBS_LOCK:
+        j = JOBS.get(_ip(req))
     return {"job": j[0].snapshot() if j else None, "files": list_files(BASE)}
 
 @app.get("/api/download")
