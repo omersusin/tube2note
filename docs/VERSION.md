@@ -1,4 +1,8 @@
-[![version v1.0.0](https://img.shields.io/badge/version-v1.0.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v1.0.0)
+[![version v1.0.1](https://img.shields.io/badge/version-v1.0.1-blue)](https://github.com/omersusin/tube2note/releases/tag/v1.0.1)
+
+## v1.0.0
+3ed775b Sync tauri version to 1.0.0
+152977c v1.0.0
 
 ## v0.19.0
 6568426 v0.19.0: universal installer, README refresh, feedback templates
