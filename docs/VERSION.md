@@ -1,4 +1,8 @@
-[![version v0.19.0](https://img.shields.io/badge/version-v0.19.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.19.0)
+[![version v1.0.0](https://img.shields.io/badge/version-v1.0.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v1.0.0)
+
+## v0.19.0
+6568426 v0.19.0: universal installer, README refresh, feedback templates
+7cdf134 Universal installer (platform detect + app/CLI ask + verify)
 
 ## v0.18.1
 9e1a8bd Sync tauri bundle version to 0.18.1
