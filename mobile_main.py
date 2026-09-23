@@ -50,6 +50,8 @@ def _outdir():
 def main(page: ft.Page):
     page.title = "tube2note"
     page.scroll = ft.ScrollMode.AUTO
+    page.theme_mode = ft.ThemeMode.DARK
+    page.theme = ft.Theme(color_scheme_seed="#d92d20")
     print(_diag(), flush=True)
     url = ft.TextField(label="YouTube link (video / channel / playlist)", expand=True)
     out_name = ft.TextField(label="Output name (empty = video title)", value="", width=220)
