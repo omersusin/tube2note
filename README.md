@@ -12,7 +12,7 @@ Tube2Note is a YouTube to text tool for students, researchers, and anyone who wo
 curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh
 ```
 
-**Features:** transcripts with timestamps & chapters · resume & watch mode ·
+**Features:** transcripts with timestamps & chapters · resume & watch mode · offline search · sponsor skip · citations (APA/MLA/Chicago/BibTeX) · SRT/VTT/TXT/PDF/EPUB/Anki/Obsidian exports · AI summarize/translate/transcribe · web UI, mobile app, Python API & MCP server.
 
 ## Walkthrough
 

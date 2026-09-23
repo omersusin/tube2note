@@ -27,6 +27,7 @@ def read_src():
     desc = " ".join(desc.split())
     m = re.search(r"^\*\*Features:\*\* ((?:[^\n]+\n?)+)", text, re.M).group(1)
     feats = [f.strip().rstrip(".") for f in " ".join(m.split("\n")).split("·")]
+    feats = [f for f in feats if f]
     return tagline, desc, feats
 
 
