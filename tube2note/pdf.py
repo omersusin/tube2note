@@ -42,33 +42,44 @@ CJK_FONTS = ("/system/fonts/NotoSansCJK-Regular.ttc",
 
 
 def _pdf_font(pdf):
-    """(font_name, unicode_ok, bold_ok). Prefers a Unicode TTF (Turkish glyphs)."""
-    for p in ("/system/fonts/DroidSans.ttf",
-              "/system/fonts/NotoSansCJK-Regular.ttc",
-              "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-              "/data/data/com.termux/files/usr/share/fonts/DejaVuSans.ttf",
-              "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-              "C:/Windows/Fonts/arial.ttf",
-              "C:/Windows/Fonts/msyh.ttc",
-              "/Library/Fonts/Arial.ttf",
-              "/System/Library/Fonts/Supplemental/Arial.ttf",
-              "/System/Library/Fonts/PingFang.ttc"):
+    """Find a system Unicode TTF; returns (font_name, uni_ok)."""
+    dejavu = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/data/data/com.termux/files/usr/share/fonts/DejaVuSans.ttf",
+        "/system/fonts/DroidSans.ttf",
+    ]
+    cjk = list(CJK_FONTS) + [
+        "/data/data/com.termux/files/usr/share/fonts/TTF/NotoSansCJK-Regular.ttc",
+        "/data/data/com.termux/files/usr/share/fonts/NotoSansCJK-Regular.ttc",
+    ]
+    for p in dejavu + cjk:
         if not os.path.exists(p):
             continue
         try:
-            pdf.add_font("body", "", p)
+            is_ttc = p.lower().endswith(".ttc") or p.lower().endswith(".otc")
+            if is_ttc:
+                try:
+                    pdf.add_font("body", "", p, ttc_index=0)
+                except TypeError:
+                    pdf.add_font("body", "", p, collection_font_number=0)
+            else:
+                pdf.add_font("body", "", p)
         except Exception:
             continue
-        bold_ok = False
         try:
-            b = p.replace(".ttf", "-Bold.ttf")
-            pdf.add_font("body", "B", b if os.path.exists(b) else p)
-            bold_ok = True
+            if is_ttc:
+                try:
+                    pdf.add_font("body", "B", p, ttc_index=0)
+                except TypeError:
+                    pdf.add_font("body", "B", p, collection_font_number=0)
+            else:
+                b = p.replace(".ttf", "-Bold.ttf").replace(".TTF", "-Bold.ttf")
+                pdf.add_font("body", "B", b if os.path.exists(b) else p)
         except Exception:
             pass
-        return "body", True, bold_ok
-    return "helvetica", False, True
+        return ("body", True)
+    return ("helvetica", False)
 
 
 def _has_cjk(lines):
@@ -104,7 +115,7 @@ def md_to_pdf(md_path, pdf_path=None, meta=None, **kw):
     pdf = _PDF()
     pdf.alias_nb_pages("{nb}")
     pdf.set_auto_page_break(True, margin=20)
-    font, uni, bold_ok = _pdf_font(pdf)
+    font, uni = _pdf_font(pdf)
     pdf._footfont = font
     if not uni:
         print("warning: no Unicode font found — non-latin glyphs will be folded to ASCII", flush=True)
@@ -125,11 +136,13 @@ def md_to_pdf(md_path, pdf_path=None, meta=None, **kw):
         m = re.search(r'^channel:\s*"?(.*?)"?\s*$', raw_text, re.M | re.I)
         author = m.group(1).strip().strip('"') if m else "tube2note"
     try:
-        pdf.set_title(title)
-        pdf.set_author(author)
+        pdf.set_title(title if uni else _fold_latin1(title))
+        pdf.set_author(author if uni else _fold_latin1(author))
     except Exception:
         pass
-    if uni and _has_cjk(lines) and not any(os.path.exists(p) for p in CJK_FONTS):
+    if uni and _has_cjk(lines) and not any(os.path.exists(p) for p in list(CJK_FONTS) + [
+            "/data/data/com.termux/files/usr/share/fonts/TTF/NotoSansCJK-Regular.ttc",
+            "/data/data/com.termux/files/usr/share/fonts/NotoSansCJK-Regular.ttc"]):
         print("warning: CJK text found but no CJK font installed "
               "(glyphs may render as blank boxes)", flush=True)
     pdf.add_page()
@@ -137,7 +150,10 @@ def md_to_pdf(md_path, pdf_path=None, meta=None, **kw):
     # ponytail: fpdf2 2.8 leaves the cursor at the right margin after
     # multi_cell; force LMARGIN or the next line has zero width and crashes.
     def mc(h, t, s=11, st=""):
-        pdf.set_font(font, st if (st != "B" or bold_ok) else "", s)
+        try:
+            pdf.set_font(font, st, s)
+        except Exception:
+            pdf.set_font(font, "", s)
         pdf.multi_cell(0, h, t if uni else _fold_latin1(t),
                        new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     seen_h2 = False
