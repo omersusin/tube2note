@@ -80,7 +80,7 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                 if transcribe:
                     if engine == "local":
                         ttext, note = _local_transcribe(v["id"], langs[0] if langs else "en",
-                                                        tmpdir)
+                                                        tmpdir, proxy=proxy, cookiefile=cookiefile)
                     else:
                         ttext, note = _try_transcribe(v["id"], langs[0] if langs else "en", tmpdir,
                                                       gemini_model, proxy, cookiefile)
@@ -149,6 +149,7 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                     time.sleep(_retry_after_hint(e, 60))
             res["error"] = f"subtitle download failed: {last}"
             res["throttled"] = _is_throttle(last)
+            res["hint"] = last
             res["stage"] = "fetch"
             return res
     except Exception as e:
@@ -156,6 +157,7 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
             raise
         res["error"] = str(e) or type(e).__name__
         res["throttled"] = _is_throttle(e)
+        res["hint"] = e
         return res
 
 
@@ -190,7 +192,7 @@ def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
                     yield i, v, {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
                                  "channel": v.get("channel"), "lg": None, "auto": False,
                                  "text": None, "error": str(e) or type(e).__name__,
-                                 "throttled": _is_throttle(e), "stage": "extract",
+                                 "throttled": _is_throttle(e), "hint": e, "stage": "extract",
                                  "chapters": [], "meta": {}}
 
 
@@ -234,10 +236,13 @@ def _chunk_pause(st, todo, title, words, t0, verbose, chunk, chunk_cooldown):
 def _prepare_text(res, v, store, seen_hashes, dedupe, link_timestamps, ts_every, single_line):
     """Fetch-stage gates: dedupe + linkify + thin + single-line.
 
-    Returns (text, plain). Raises _Skip for duplicates (dedupe writes the hash first).
+    Returns (text, plain). Raises _Skip for duplicates (dedupe writes the hash first,
+    except too-short texts which run_job skips anyway — never poison future dedupe).
     """
     text = res["text"]
-    if dedupe and text:
+    if text is None:
+        return None, None
+    if dedupe and text and len(text) >= 50:
         sha = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
         owner = store.hash_owner(sha) if store is not None else seen_hashes.get(sha)
         if owner and owner != v["id"]:
@@ -324,8 +329,12 @@ def _write_video(fout, jfh, i, v, title, wurl, lg, auto, text, plain, res, extra
             if res.get("translation"):
                 if res.get("bilingual"):
                     _bok2, _body2 = _zip_bilingual(text, res["translation"])
-                    vf.write(f"\n### Bilingual ({bilingual})\n"
-                             f"{_body2 if _bok2 else res['translation']}\n")
+                    if _bok2:
+                        vf.write(f"\n### Bilingual ({bilingual})\n{_body2}\n")
+                    else:
+                        if verbose:
+                            log("  ! bilingual paragraph counts differ, falling back to sections")
+                        vf.write(f"\n### Translation ({bilingual})\n{res['translation']}\n")
                 else:
                     vf.write(f"\n### Translation ({translate})\n{res['translation']}\n")
             vf.write(f"\n{text}\n")
@@ -357,65 +366,77 @@ def _finalize(out, root, layout, videos, completed, words_by_id, store,
               split_words, pdf, epub, st):
     """File mode only: INDEX, skip reconcile, Skipped tail, panels, split/pdf/epub.
     Returns the result dict. Closes the store."""
-    if layout != "single":
-        _write_index(root, videos, completed, words_by_id, store.skip_reasons())
-        print(f"index: {os.path.join(root, 'INDEX.md')}", flush=True)
-    # reconcile skips: drop videos that completed since, so counts/tail stay honest
-    for vid in list(completed):
-        store.unskip(vid)
-    ndone, nskip = store.counts()
-    if ndone + nskip >= len(videos):
-        if nskip > 0:
-            tail_done = False
-            try:
-                with open(out, "rb") as _f:
-                    _f.seek(max(0, os.path.getsize(out) - 5000))
-                    tail_done = b"## Skipped" in _f.read()
-            except OSError:
-                pass
-            if not tail_done:
-                with open(out, "a", encoding="utf-8") as f:
-                    f.write("\n## Skipped\n\n")
-                    for vid, title, url, reason in store.skips():
-                        f.write(f"- [{title or '?'}]({url or ''}) — {reason}\n")
-        dash_end()
-        print(panel("Done", [
-            f"{green(str(ndone))} videos -> {out} ({nskip} skipped)",
-            f"~{st['words']} words this run",
-        ]))
-        if split_words > 0:
-            total_words = len(open(out, encoding="utf-8").read().split())
-            if total_words > split_words:
-                parts = split_output(out, split_words)
-                if len(parts) > 1:
-                    print(panel("Upload to NotebookLM", ["Add each part as a separate source:"]
-                                + [f"  {j}. {p}" for j, p in enumerate(parts, 1)]))
-                else:
-                    print(f"Single file is enough ({total_words} words).")
-            else:
-                print(f"No split needed ({total_words} words <= {split_words}).")
-        else:
-            print("Upload to NotebookLM: add this file as a source.")
-            print(dim("Cap is 500,000 words/file — use --split-words if bigger."))
-        if pdf:
-            base, _ = os.path.splitext(out)
-            for src in [out] + sorted(glob.glob(base + "_part*.md")):
+    try:
+        if layout != "single":
+            _write_index(root, videos, completed, words_by_id, store.skip_reasons())
+            print(f"index: {os.path.join(root, 'INDEX.md')}", flush=True)
+        # reconcile skips: drop videos that completed since, so counts/tail stay honest
+        for vid in list(completed):
+            store.unskip(vid)
+        ndone, nskip = store.counts()
+        if ndone + nskip >= len(videos):
+            if nskip > 0:
+                tail_done = False
                 try:
-                    print("PDF: " + md_to_pdf(src), flush=True)
-                except SystemExit as e:
-                    print(e)
-                    break
-        if epub:
-            from .epub import md_to_epub
-            try:
-                print("EPUB: " + md_to_epub(out), flush=True)
-            except OSError as e:
-                print(f"! EPUB failed: {e}")
-    else:
-        dash_end()
-        print(f"Checkpoint: {st['ok']} videos, {st['words']} words -> {out} (total: {ndone}/{len(videos)})")
-    store.close()
-    return {"ok": st["ok"], "skipped": nskip, "total": len(videos)}
+                    with open(out, "rb") as _f:
+                        _f.seek(max(0, os.path.getsize(out) - 5000))
+                        tail_done = b"## Skipped" in _f.read()
+                except OSError:
+                    pass
+                if not tail_done:
+                    try:
+                        with open(out, "a", encoding="utf-8") as f:
+                            f.write("\n## Skipped\n\n")
+                            for vid, title, url, reason in store.skips():
+                                f.write(f"- [{title or '?'}]({url or ''}) — {reason}\n")
+                    except OSError:
+                        pass
+            dash_end()
+            print(panel("Done", [
+                f"{green(str(ndone))} videos -> {out} ({nskip} skipped)",
+                f"~{st['words']} words this run",
+            ]))
+            if split_words > 0:
+                with open(out, encoding="utf-8") as _rf:
+                    total_words = len(_rf.read().split())
+                if total_words > split_words:
+                    parts = split_output(out, split_words)
+                    if len(parts) > 1:
+                        print(panel("Upload to NotebookLM", ["Add each part as a separate source:"]
+                                    + [f"  {j}. {p}" for j, p in enumerate(parts, 1)]))
+                    else:
+                        print(f"Single file is enough ({total_words} words).")
+                else:
+                    print(f"No split needed ({total_words} words <= {split_words}).")
+            else:
+                print("Upload to NotebookLM: add this file as a source.")
+                print(dim("Cap is 500,000 words/file — use --split-words if bigger."))
+            if pdf:
+                base, _ = os.path.splitext(out)
+                for src in [out] + sorted(glob.glob(base + "_part*.md")):
+                    try:
+                        print("PDF: " + md_to_pdf(src), flush=True)
+                    except SystemExit as e:
+                        print(e)
+                        break
+            if epub:
+                from .epub import md_to_epub
+                base, _ = os.path.splitext(out)
+                for src in [out] + sorted(glob.glob(base + "_part*.md")):
+                    try:
+                        print("EPUB: " + md_to_epub(src), flush=True)
+                    except OSError as e:
+                        print(f"! EPUB failed: {e}")
+                        break
+        else:
+            dash_end()
+            print(f"Checkpoint: {st['ok']} videos, {st['words']} words -> {out} (total: {ndone}/{len(videos)})")
+        return {"ok": st["ok"], "skipped": nskip, "total": len(videos)}
+    finally:
+        try:
+            store.close()
+        except Exception:
+            pass
 
 
 def _open_collection(out, fresh, to_stdout, jsonl, total, langs, layout, chunk, chunk_cooldown, _say):
@@ -427,6 +448,7 @@ def _open_collection(out, fresh, to_stdout, jsonl, total, langs, layout, chunk, 
         if fresh:
             try:
                 store.cx.execute("DELETE FROM videos")
+                store.cx.execute("DELETE FROM hashes")
                 store.cx.commit()
             except Exception:
                 pass
@@ -439,25 +461,44 @@ def _open_collection(out, fresh, to_stdout, jsonl, total, langs, layout, chunk, 
         done = set()
     fresh_start = fresh or (not to_stdout and not os.path.exists(out))
     mode = "w" if fresh_start else "a"
-    fout = sys.stdout if to_stdout else open(out, mode, encoding="utf-8")  # never closed (see finally)
+    fout = None
     jfh = None
-    if jsonl:
-        jpath = out + ".jsonl"
+    try:
+        fout = sys.stdout if to_stdout else open(out, mode, encoding="utf-8")  # never closed (see finally)
+        if jsonl and not to_stdout:
+            jpath = out + ".jsonl"
+            if fresh_start:
+                try:
+                    os.remove(jpath)
+                except OSError:
+                    pass
+            elif done and not os.path.exists(jpath):
+                _say("warning: .jsonl missing but videos already done — rows incomplete, use --fresh",
+                      file=sys.stderr, flush=True)
+            jfh = open(jpath, "a", encoding="utf-8")
         if fresh_start:
-            try:
-                os.remove(jpath)
-            except OSError:
-                pass
-        elif done and not os.path.exists(jpath):
-            _say("warning: .jsonl missing but videos already done — rows incomplete, use --fresh",
-                  file=sys.stderr, flush=True)
-        jfh = open(jpath, "a", encoding="utf-8")
-    if fresh_start:
-        done = set()
-    if mode == "w" and not to_stdout:
-        today = datetime.date.today().isoformat()
-        fout.write(f"# YouTube Research Notes\n\n- Date: {today}\n- Videos: target {total}\n"
-                   f"- Languages: {','.join(langs)}\n\nFeed this file to NotebookLM as a source.\n\n---\n\n")
+            done = set()
+        if mode == "w" and not to_stdout:
+            today = datetime.date.today().isoformat()
+            fout.write(f"# YouTube Research Notes\n\n- Date: {today}\n- Videos: target {total}\n"
+                       f"- Languages: {','.join(langs)}\n\nFeed this file to NotebookLM as a source.\n\n---\n\n")
+    except Exception:
+        try:
+            if fout is not None and fout is not sys.stdout:
+                fout.close()
+        except Exception:
+            pass
+        try:
+            if jfh is not None:
+                jfh.close()
+        except Exception:
+            pass
+        try:
+            if store is not None:
+                store.close()
+        except Exception:
+            pass
+        raise
     todo = max(0, total - len(done))
     _say(f"target: {todo} videos (chunk: {chunk}, chunk break: {chunk_cooldown // 60} min, layout: {layout})",
          flush=True)
@@ -543,7 +584,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     if not to_stdout:  # a stdout job has no resumable artifact; saving out="-" would poison --resume-last
         _save_last(urls=urls, out=os.path.basename(out),
                    outdir=os.path.dirname(os.path.abspath(out)) or ".", lang=lang_str,
-                   max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown, layout=layout,
+                   max_n=max_n, chunk=chunk, chunk_cooldown=chunk_cooldown,
+                   throttle_cooldown=throttle_cooldown, layout=layout,
                    template=template, ts=ts, split_words=split_words, sleep=sleep,
                    since=since, proxy=proxy, cookiefile=cookiefile, profile=profile,
                    translate=translate, clean=clean, clean_level=clean_level,
@@ -596,7 +638,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     if verbose:
                         log(f"  ! skipped: {res['error']}")
                     _fail(st, todo, st["words"], t0, verbose, throttle_cooldown,
-                          res.get("error") or "",
+                          res.get("hint") or res.get("error") or "",
                           _Skip(v["title"], v["url"], res["error"], res["throttled"]),
                           "extract failed")
                     continue
@@ -619,7 +661,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     if verbose:
                         log(f"  ! subtitle download failed: {res['error']}")
                     _fail(st, todo, st["words"], t0, verbose, throttle_cooldown,
-                          res.get("error") or "",
+                          res.get("hint") or res.get("error") or "",
                           _Skip(title, wurl, res["error"], res["throttled"]), "subtitle failed")
                     continue
                 st["consec"], st["status"] = 0, ""
@@ -667,6 +709,14 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             pass
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
+        except NameError:
+            pass
+        try:
+            if sys.exc_info()[0] is not None and store is not None:
+                try:
+                    store.close()
+                except Exception:
+                    pass
         except NameError:
             pass
         from .ui import set_pipe as _set_pipe

@@ -26,10 +26,32 @@ def _label_to_secs(label):
     return h * 3600 + m * 60 + s
 
 
+_TS_RE = re.compile(r"\[(\d+:\d{2}(?::\d{2})?)\](?!\()")
+
+
+def _valid_label(label):
+    parts = label.split(":")
+    try:
+        nums = [int(x) for x in parts]
+    except ValueError:
+        return False
+    if len(nums) == 2:
+        m, s = nums
+        return 0 <= s < 60
+    if len(nums) == 3:
+        h, m, s = nums
+        return 0 <= m < 60 and 0 <= s < 60
+    return False
+
+
 def linkify(text, vid):
-    """[MM:SS]/[H:MM:SS] markers -> clickable youtu.be links."""
-    return re.sub(r"\[(\d+:\d{2}(?::\d{2})?)\]",
-                  lambda m: link_ts(m.group(1), vid, _label_to_secs(m.group(1))), text)
+    """[MM:SS]/[H:MM:SS] markers -> clickable youtu.be links. Idempotent."""
+    def _rep(m):
+        label = m.group(1)
+        if not _valid_label(label):
+            return m.group(0)
+        return link_ts(label, vid, _label_to_secs(label))
+    return _TS_RE.sub(_rep, text)
 
 
 def thin_markers(text, every):
@@ -40,7 +62,7 @@ def thin_markers(text, every):
         return text
     kept = -10 ** 9
     out = []
-    pat = re.compile(r"\[(\d+:\d{2}(?::\d{2})?)\](\((?:https://youtu\.be/[^)]+)?\))?")
+    pat = re.compile(r"\[(\d+:\d{2}(?::\d{2})?)\](\((?:https?://[^)]+)?\))?")
     pos = 0
     for m in pat.finditer(text):
         secs = _label_to_secs(m.group(1))
@@ -56,4 +78,4 @@ def thin_markers(text, every):
 
 def to_single_line(text):
     """Obsidian single-line mode: paragraphs joined, markers stay inline."""
-    return " ".join(p.strip() for p in text.split("\n\n") if p.strip())
+    return " ".join(" ".join(p.split()) for p in text.split("\n\n") if p.strip())

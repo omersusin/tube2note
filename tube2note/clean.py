@@ -13,7 +13,8 @@ _FILLER_CACHE = {}
 DUP_MAX_WORDS = 6  # longest repeated phrase we collapse ("you know you know")
 
 
-ABBR_RE = re.compile(r"\b(Mr|Mrs|Dr|Jr|St|Sr|Sgt|Prof|vs|etc|[Ee]\.g|[Ii]\.e)\.")
+ABBR_RE = re.compile(r"\b(Mr|Mrs|Dr|Jr|St|Sr|Sgt|Prof|vs|etc|[Ee]\.g|[Ii]\.e|[AP]\.?M\.?)\.",
+                       re.IGNORECASE)
 
 
 NUMDOT_RE = re.compile(r"(\d)\.(\d)")
@@ -67,6 +68,9 @@ def _clean_text(text, lang=None, level="full"):
             tag, body = m.group(1), body[m.end():]
         if filler_re:
             body = re.sub(r",(\s*,)+", ",", filler_re.sub("", body))  # "this, uh, works" -> "this, works"
+            body = re.sub(r"\s{2,}", " ", body)  # filler removal debris
+            body = re.sub(r" ([.,;:!?])", r"\1", body)  # "Hello ." -> "Hello."
+            body = re.sub(r"^[.,;:!?]\s+", "", body).strip()  # ". Hello" -> "Hello"
         body = _collapse_repeats(body)
         if level == "light":
             body = re.sub(r"\s{2,}", " ", body).strip()

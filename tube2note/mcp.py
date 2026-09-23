@@ -49,17 +49,32 @@ def _text(s):
     return {"content": [{"type": "text", "text": s}]}
 
 
+def _coerce_int(v, default, label):
+    if v is None:
+        return default
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a number")
+
+
 def _call(name, args):
-    args = args or {}
+    if not isinstance(args, dict):
+        raise ValueError("arguments must be an object")
     if name == "download":
+        if not args.get("url"):
+            raise ValueError("missing required param: url")
+        if args.get("out") is not None and not isinstance(args.get("out"), str):
+            raise ValueError("out must be a string")
         from .config import resolve_config
         from .job import _exit_code, run_job
-        cfg = resolve_config({"outdir": args.get("outdir"), "layout": args.get("layout"),
-                              "lang": args.get("lang")}, None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            cfg = resolve_config({"outdir": args.get("outdir"), "layout": args.get("layout"),
+                                  "lang": args.get("lang")}, None)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):  # progress bars must not corrupt the RPC stream
-            res = run_job([args["url"]], args.get("out", "tube2note.md"), cfg["lang"],
-                          int(args.get("max", 100)), 2.0, videos=None,
+            res = run_job([args["url"]], args.get("out") or "tube2note.md", cfg["lang"],
+                          _coerce_int(args.get("max"), 100, "max"), 2.0,
                           outdir=cfg["outdir"], layout=cfg["layout"],
                           summarize=bool(args.get("summarize")),
                           translate=args.get("translate"), bilingual=args.get("bilingual"),
@@ -73,11 +88,14 @@ def _call(name, args):
         from .commands import cmd_status
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            cmd_status(args.get("dir", "."), True)
+            cmd_status(args.get("dir") or ".", True)
         return _text(buf.getvalue() or "No collections.")
     if name == "dry_run":
+        if not args.get("url"):
+            raise ValueError("missing required param: url")
         from .source import detect_langs, expand
-        videos, hint = expand([args["url"]], int(args.get("max", 100)))
+        with contextlib.redirect_stdout(io.StringIO()):
+            videos, hint = expand([args["url"]], _coerce_int(args.get("max"), 100, "max"))
         sug, found = detect_langs(videos)
         return _text(json.dumps({"source": hint, "videos": len(videos),
                                  "languages": sug, "found": found[:8]}, indent=2))
@@ -123,6 +141,9 @@ def cmd_mcp():
         try:
             req = json.loads(line)
         except ValueError:
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": None,
+                                         "error": {"code": -32700, "message": "parse error"}}) + "\n")
+            sys.stdout.flush()
             continue
         resp, _ = _handle(req)
         if resp is not None:

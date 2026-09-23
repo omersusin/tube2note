@@ -15,7 +15,8 @@ function payload() {
     since: $("since").value, timestamps: $("timestamps").checked, clean: $("clean").checked,
     link_timestamps: $("link_timestamps").checked, srt: $("srt").checked,
     transcribe: $("transcribe").checked, summarize: $("summarize").checked,
-    translate: $("translate").value,
+    translate: $("translate").value, bilingual: $("bilingual").value,
+    pdf: $("pdf").checked, epub: $("epub").checked,
     split_words: +$("split").value || 0, workers: +$("workers").value || 1};
 }
 function render(s) {
@@ -36,6 +37,10 @@ async function poll() {
 $("go").onclick = async () => {
   $("err").textContent = ""; $("dl").hidden = true;
   try { render(await api("/api/start", payload())); } catch (e) { $("err").textContent = e.message; }
+};
+$("preview").onclick = async () => {
+  $("err").textContent = ""; $("dl").hidden = true;
+  try { render(await api("/api/start", Object.assign(payload(), {dry_run: true}))); } catch (e) { $("err").textContent = e.message; }
 };
 $("local").onclick = () => { location.href = "http://127.0.0.1:8765"; };
 poll();

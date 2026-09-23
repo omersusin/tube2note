@@ -136,7 +136,9 @@ def _daemonize(logpath, pidpath):
     _ui.UI_ON = False
     _ui.set_verbose(False)
     me = os.getpid()
-    _write_pidfile(pidpath, me)
+    if not _write_pidfile(pidpath, me):
+        print("watch: PID file already exists (another daemon starting?) — exiting.", flush=True)
+        raise SystemExit(1)
 
     def _on_term(signum, frame):
         try:
@@ -156,11 +158,13 @@ def _cmd_stop():
         print("watch: not running (no PID file).")
         return 1
     if not _pid_is_alive(pid):
-        _unlink_quiet(p)
+        if _read_pidfile(p).get("pid") == pid:
+            _unlink_quiet(p)
         print(f"watch: stale PID file removed (pid {pid} dead).")
         return 1
     if not _is_ours(pid):
-        _unlink_quiet(p)
+        if _read_pidfile(p).get("pid") == pid:
+            _unlink_quiet(p)
         print(f"watch: stale PID file removed (pid {pid} reused by another process — NOT killed).")
         return 1
     os.kill(pid, signal.SIGTERM)
@@ -171,7 +175,8 @@ def _cmd_stop():
     else:
         print(f"watch: pid {pid} ignoring SIGTERM; left running.")
         return 1
-    _unlink_quiet(p)
+    if _read_pidfile(p).get("pid") == pid:
+        _unlink_quiet(p)
     print(f"watch: stopped (pid {pid}).")
     return 0
 
@@ -180,7 +185,11 @@ def _check(urls, out, cfg, args):
     """One check: list fresh, run new videos, update seen. Returns exit code."""
     path = _state_path(urls, out)
     seen = _load_seen(path)
-    videos, _ = expand(urls, args.max, fresh=True)
+    try:
+        videos, _ = expand(urls, args.max, fresh=True)
+    except Exception as e:
+        print(f"watch: listing failed ({e}), will retry next round.")
+        return 2
     if not videos:
         print("watch: listing failed, will retry next round.")
         return 2
@@ -225,7 +234,7 @@ def cmd_watch(argv):
     ap.add_argument("-d", "--dir", default=None)
     ap.add_argument("--layout", default=None)
     ap.add_argument("--lang", default=None)
-    ap.add_argument("--no-clean", dest="clean", action="store_false")
+    ap.add_argument("--no-clean", dest="clean", action="store_false", default=None)
     ap.add_argument("--timestamps", action="store_true")
     ap.add_argument("--link-timestamps", action="store_true")
     ap.add_argument("--srt", action="store_true")
@@ -240,7 +249,7 @@ def cmd_watch(argv):
         return _cmd_stop()
     targets = [({"url": u}, a.out, a.lang) for u in a.urls]
     if a.subs:
-        subs = load_subs(a.subs)
+        subs = load_subs(os.path.expanduser(a.subs))
         if not subs:
             print(f"watch: no subscriptions in {a.subs}")
             return 1
@@ -277,6 +286,9 @@ def cmd_watch(argv):
         if old:
             _unlink_quiet(_pid_path())
             print(f"watch: stale PID file removed (pid {old}).")
+        elif os.path.exists(_pid_path()):
+            _unlink_quiet(_pid_path())
+            print("watch: stale PID file removed (unreadable).")
         if a.verbose:
             print("watch: --verbose ignored in daemon mode (log uses quiet progress).", flush=True)
         a.verbose = False
@@ -289,9 +301,12 @@ def cmd_watch(argv):
         secs = a.interval * 60
         print(f"watch: next check in {a.interval:g} min (Ctrl+C to stop).")
         try:
+            lag = 0.0  # last round duration: subtract so checks stay on cadence
             while True:
-                time.sleep(secs)
+                time.sleep(max(0.0, secs - lag))
+                t0 = time.monotonic()
                 code = _round()
+                lag = time.monotonic() - t0
                 print(f"watch: next check in {a.interval:g} min (Ctrl+C to stop).")
         except KeyboardInterrupt:
             print("\nwatch: stopped.")

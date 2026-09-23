@@ -19,24 +19,57 @@ def _say(*a, **k):
 VID_RE = r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})"
 
 
+_BAN_PHRASES = (
+    "sign in to confirm you",
+    "confirm you are not a bot",
+    "confirm you are not a robot",
+    "confirm you're not a bot",
+    "http error 403",
+    "http error 429",
+    "http error 500",
+    "http error 502",
+    "http error 503",
+    "http error 504",
+    "too many requests",
+    "service unavailable",
+    "internal server error",
+    "bad gateway",
+    "gateway timeout",
+    "rate limit",
+    "rate-limit",
+    "ratelimit",
+    "quota exceeded",
+    "quota",
+    "slow down",
+    "try again later",
+    "unusual traffic",
+    "captcha",
+)
+_PRIVATE_WORDS = ("private video", "private ", "this video is private", "deleted",
+                  "video unavailable", "copyright", "login required")
+
+
 def _is_throttle(e):
     # yt-dlp wraps HTTP errors in DownloadError/ExtractorError WITHOUT .code,
     # but the message keeps "HTTP Error 429: ..." — check both.
-    if getattr(e, "code", None) in (403, 429, 500, 502, 503):
-        # 403 alone is not always a ban (private video), so fall through to
-        # message check for 403 and require ban phrasing.
-        if getattr(e, "code", None) != 403:
-            return True
-    msg = str(e)
-    if re.search(r"\b429\b", msg) is not None or "Too Many Requests" in msg:
+    try:
+        code = int(getattr(e, "code", 0) or 0)
+    except (TypeError, ValueError):
+        code = 0
+    if code in (429, 500, 502, 503, 504):
         return True
+    msg = str(e)
     low = msg.lower()
-    if any(k in low for k in (
-        "sign in to confirm you",
-        "confirm you're not a bot",
-        "http error 403",
-        "too many requests",
-    )):
+    private = any(k in low for k in _PRIVATE_WORDS)
+    ban = any(k in low for k in _BAN_PHRASES)
+    if code == 403 or "403" in msg:
+        # 403 alone is not always a ban (private video): require ban phrasing,
+        # and never when it reads like a private/deleted video.
+        return bool(ban and not private)
+    if re.search(r"\b429\b", msg):
+        # bare "429" (view counts, video ids) is not a ban: need error context.
+        return bool(ban or re.search(r"http|error|retr|rate|quota|slow|throttl|ban", low))
+    if ban and not private:
         return True
     return re.search(r"\bip\b.{0,30}\bblock|\bblock.{0,30}\bip\b", low) is not None
 
@@ -67,7 +100,10 @@ def _retry_after_hint(e, default, cap=RETRY_AFTER_CAP):
     try:
         hint = int(str(raw).strip().split(",")[0].split()[0])
     except (ValueError, TypeError, IndexError):
-        return default
+        try:  # "120.5", "120s"
+            hint = int(float(str(raw).strip().split(",")[0].rstrip("s")))
+        except (ValueError, TypeError, IndexError):
+            return default
     if hint <= 0:
         return default
     return max(default, min(hint, cap))
@@ -77,6 +113,18 @@ class Bucket:
     """Thread-safe token bucket: max `rate` timedtext fetches/sec, `capacity` burst."""
 
     def __init__(self, rate, capacity):
+        try:
+            rate = float(rate)
+        except (TypeError, ValueError):
+            rate = 1.0
+        try:
+            capacity = int(capacity)
+        except (TypeError, ValueError):
+            capacity = 1
+        if rate <= 0:
+            rate = 1.0
+        if capacity < 1:
+            capacity = 1
         self.rate, self.capacity = rate, capacity
         self.tokens, self.stamp = capacity, time.monotonic()
         self.lock = threading.Lock()

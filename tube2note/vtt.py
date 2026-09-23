@@ -2,7 +2,7 @@
 import html
 import re
 
-TAG_RE = re.compile(r"<[^>]+>")
+TAG_RE = re.compile(r"<(?:/?[A-Za-z][^>]*|\d[^>]*)>")
 
 
 def _to_secs(t):
@@ -13,6 +13,20 @@ def _to_secs(t):
         return int(p[0]) * 60 + float(p[1])
     except (ValueError, IndexError, AttributeError):
         return 0.0
+
+
+def _try_secs(t, prev):
+    """Parse a cue start; garbage/prose/negative keeps the previous start."""
+    s = (t or "").strip()
+    if s.startswith("-"):
+        return 0.0
+    try:
+        p = s.split(":")
+        if len(p) == 3:
+            return int(p[0]) * 3600 + int(p[1]) * 60 + float(p[2])
+        return int(p[0]) * 60 + float(p[1])
+    except (ValueError, IndexError, AttributeError):
+        return prev
 
 
 def _fmt_ts(s):
@@ -26,21 +40,40 @@ def vtt_segments(vtt: str):
     lines = vtt.splitlines()
     # everything before the first cue timing line is header: the WEBVTT signature
     # plus YouTube's "Kind: captions" / "Language: en" metadata, never transcript
-    in_header = bool(lines) and lines[0].lstrip("﻿").strip().startswith("WEBVTT")
+    in_header = True
     segs, start, saw_cue = [], 0.0, False
+    skip_block = False
     for idx, block in enumerate(lines):
         s = block.strip()
+        if skip_block:
+            if not s:
+                skip_block = False
+            continue
         if "-->" in s:
             in_header = False
             saw_cue = True
-            start = _to_secs(s.split("-->")[0])
+            start = _try_secs(s.split("-->")[0], start)
             continue
-        if in_header or not s or s.startswith(("NOTE", "STYLE", "REGION")):
+        if in_header:
+            # header ends at the first cue; WEBVTT may sit on any early line
+            if s.lstrip("﻿").strip().upper().startswith("WEBVTT"):
+                continue
+            if not s:
+                continue
+            # tolerate leading blank lines: stay in header until a cue appears
             continue
-        if s.isdigit() and idx + 1 < len(lines) and "-->" in lines[idx + 1]:
-            continue  # numeric cue identifier; a spoken number alone ("1999") is real text
+        if not s or s.startswith(("NOTE", "STYLE", "REGION")):
+            if s.startswith(("NOTE", "STYLE", "REGION")):
+                skip_block = True  # multi-line NOTE/STYLE/REGION blocks
+            continue
+        if idx + 1 < len(lines) and "-->" in lines[idx + 1]:
+            # cue identifier line (numeric or named like cue-99); a spoken
+            # number alone ("1999") is real text and has no timing after it
+            if s.isdigit() or re.match(r"^[A-Za-z][\w.-]*$", s):
+                continue
         s = TAG_RE.sub("", s)
         s = html.unescape(s).replace(" ", " ").strip()
+        s = re.sub(r" {2,}", " ", s)
         if s and (not segs or segs[-1][1] != s):  # drop back-to-back duplicates from auto captions
             segs.append((start, s))
     if not saw_cue:

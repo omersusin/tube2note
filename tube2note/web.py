@@ -42,7 +42,7 @@ PROGRESS_RE = re.compile(r"(\d+)/(\d+) videos · (\d+) words")
 CURRENT_RE = re.compile(r"^\[(\d+)/(\d+)\] (.*)$")
 LAYOUTS = ("single", "videos", "tree")
 MAX_BODY = 64 * 1024
-SERVED_EXT = {".md": "text/markdown", ".pdf": "application/pdf"}
+SERVED_EXT = {".md": "text/markdown", ".pdf": "application/pdf", ".epub": "application/epub+zip"}
 
 
 def gemini_available():
@@ -52,7 +52,9 @@ def gemini_available():
 # --------------------------------------------------------------------------- request -> argv
 
 def _bool(v):
-    return v is True or v in ("1", "true", "on", 1)
+    if v is True or v == 1:
+        return True
+    return str(v or "").strip().lower() in ("1", "true", "on", "yes", "y")
 
 
 def _int(v, lo, hi, default, label):

@@ -55,9 +55,11 @@ def _pypi_latest(pkg, proxy=None):
                          "tube2note", "pypi.json")
     try:
         d = json.load(open(cache, encoding="utf-8"))
-        if time.time() - d.get("ts", 0) < 7 * 86400 and d.get(pkg):
+        if not isinstance(d, dict):
+            raise ValueError("corrupt cache")
+        if time.time() - (d.get("ts", 0) or 0) < 7 * 86400 and d.get(pkg):
             return d[pkg], " (cached)"
-    except (OSError, ValueError):
+    except (OSError, ValueError, TypeError, AttributeError):
         pass
     try:
         req = urllib.request.Request(f"https://pypi.org/pypi/{pkg}/json",
@@ -73,6 +75,8 @@ def _pypi_latest(pkg, proxy=None):
             old = {}
             try:
                 old = json.load(open(cache, encoding="utf-8"))
+                if not isinstance(old, dict):
+                    old = {}
             except (OSError, ValueError):
                 pass
             old.update({"ts": time.time(), pkg: ver})
@@ -94,7 +98,10 @@ def cmd_widget():
                 "# Termux:Widget shortcut — resume last tube2note collection\n"
                 'if command -v tube2note >/dev/null; then exec tube2note --resume-last; '
                 'else exec python3 -m tube2note --resume-last; fi\n')
-    os.chmod(dst, 0o755)
+    try:
+        os.chmod(dst, 0o755)
+    except OSError as e:
+        print(f"Note: chmod failed ({e}) — hook written but may not be executable.")
     print(f"Widget written to {dst} (needs Termux:Widget app).")
 
 
@@ -178,10 +185,17 @@ def cmd_extras(argv=None):
             print(f"unknown extra: {name}")
             return
         import subprocess
-        for pkg in info.get("pip", []):
+        pkgs = info.get("pip", [])
+        if not pkgs:
+            print(f"'{name}' has no pip package to remove (external binary/model).")
+        for pkg in pkgs:
             r = subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", pkg],
                                capture_output=True, text=True)
-            print(r.stdout.strip().splitlines()[-1] if r.returncode == 0 else f"remove failed: {r.stderr[-200:]}")
+            if r.returncode == 0:
+                lines = r.stdout.strip().splitlines()
+                print(lines[-1] if lines else f"removed {pkg}.")
+            else:
+                print(f"remove failed: {r.stderr[-200:]}")
         try:
             store = load_config()
             store.get("extras", {}).pop(name, None)
@@ -214,15 +228,18 @@ def cmd_share():
                 'cd "$HOME/yt2md" || exit 1\n'
                 'if command -v tube2note >/dev/null; then exec tube2note -o shared.md "$1"; '
                 'else exec python3 -m tube2note -o shared.md "$1"; fi\n')
-    os.chmod(dst, 0o755)
+    try:
+        os.chmod(dst, 0o755)
+    except OSError as e:
+        print(f"Note: chmod failed ({e}) — hook written but may not be executable.")
     print(f"Share hook written to {dst} (Share a YouTube link > Termux).")
 
 
 def cmd_status(d=".", as_json=False):
-    d = os.path.expanduser(d)
+    d = os.path.expanduser(d or ".")
     try:
         files = sorted(os.listdir(d))
-    except OSError as e:
+    except (OSError, TypeError, ValueError) as e:
         print(f"Cannot list {d}: {e}")
         return
     rows = []
@@ -230,18 +247,24 @@ def cmd_status(d=".", as_json=False):
         if not f.endswith(".md") or "_part" in f:
             continue
         path = os.path.join(d, f)
+        try:
+            size_kb = f"{os.path.getsize(path) // 1024} KB"
+        except OSError:
+            continue  # deleted mid-listing
         if os.path.exists(path + ".db"):  # SQLite resume store (v0.12+)
             from .store import Store
             try:
                 st = Store(path + ".db")
-                dn, sk = st.counts()
-                st.close()
+                try:
+                    dn, sk = st.counts()
+                finally:
+                    st.close()
             except Exception:
                 dn, sk = _count_lines(path + ".done"), _count_lines(path + ".skip")
         else:  # legacy sidecars
             dn = _count_lines(path + ".done")
             sk = _count_lines(path + ".skip")
-        rows.append([f, str(dn), str(sk), f"{os.path.getsize(path) // 1024} KB"])
+        rows.append([f, str(dn), str(sk), size_kb])
     if not rows:
         print(f"No collections in {d}.")
         return

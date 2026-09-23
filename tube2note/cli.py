@@ -23,8 +23,9 @@ from .tui import cmd_setup, tui
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "status":
-        d = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("-") else "."
-        cmd_status(d, "--json" in sys.argv)
+        _sargs = sys.argv[2:]
+        _sdirs = [x for x in _sargs if not x.startswith("-")]
+        cmd_status(_sdirs[0] if _sdirs else ".", "--json" in _sargs)
         return
     if len(sys.argv) > 1 and sys.argv[1] == "setup":
         cmd_setup("--advanced" in sys.argv)
@@ -34,6 +35,9 @@ def main():
         if "--proxy" in sys.argv:
             i = sys.argv.index("--proxy")
             px = sys.argv[i + 1] if i + 1 < len(sys.argv) else None
+            if not px or px.startswith("-"):
+                print("doctor: --proxy needs a URL (e.g. socks5://127.0.0.1:1080)")
+                return
         cmd_doctor(px)
         return
     if len(sys.argv) > 1 and sys.argv[1] == "serve":
@@ -54,11 +58,23 @@ def main():
         raise SystemExit(cmd_watch(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "search":
         from .search import search_collections
-        _q = sys.argv[2] if len(sys.argv) > 2 else ""
-        _d, _j = ".", "--json" in sys.argv
-        if "-d" in sys.argv:
-            _i = sys.argv.index("-d")
-            _d = sys.argv[_i + 1] if _i + 1 < len(sys.argv) else "."
+        _q, _d, _j = "", ".", "--json" in sys.argv[2:]
+        _rest = sys.argv[2:]
+        _k = 0
+        while _k < len(_rest):
+            if _rest[_k] == "-d":
+                if _k + 1 >= len(_rest) or _rest[_k + 1].startswith("-"):
+                    print("search: -d needs a directory")
+                    raise SystemExit(2)
+                _d = _rest[_k + 1]
+                _k += 2
+            elif _rest[_k] == "--json":
+                _k += 1
+            elif not _rest[_k].startswith("-") and not _q:
+                _q = _rest[_k]
+                _k += 1
+            else:
+                _k += 1
         raise SystemExit(search_collections(_q, _d, _j))
     if len(sys.argv) > 1 and sys.argv[1] == "serve-api":
         from .server_api import main as _api_main
@@ -92,12 +108,12 @@ def main():
     ap.add_argument("urls", nargs="*", help="channel / playlist / video URLs")
     ap.add_argument("-o", "--out", default="tube2note.md")
     ap.add_argument("--lang", default=None, help="subtitle language priority, comma separated")
-    ap.add_argument("--max", type=int, default=100, help="max number of videos")
-    ap.add_argument("--sleep", type=float, default=2.0, help="pause between videos (s)")
+    ap.add_argument("--max", type=int, default=None, help="max number of videos")
+    ap.add_argument("--sleep", type=float, default=None, help="pause between videos (s)")
     ap.add_argument("--chunk", type=int, default=None, help="long break every N videos")
     ap.add_argument("--chunk-cooldown", type=int, default=None, help="break between chunks (s)")
     ap.add_argument("--fetch-gap", type=int, default=None, help="max pause before subtitle fetch, seconds (default 10)")
-    ap.add_argument("--workers", type=int, default=1, help="parallel fetch workers 1-4 (default 1, serial and safest)")
+    ap.add_argument("--workers", type=int, default=None, help="parallel fetch workers 1-4 (default 1, serial and safest)")
     ap.add_argument("--throttle-cooldown", type=int, default=1800, help="break after 5 throttles in a row (s)")
     ap.add_argument("-d", "--dir", default=None, help="output folder (created if missing)")
     ap.add_argument("--layout", default=None, help="output layout: single, videos or tree")
@@ -126,7 +142,7 @@ def main():
     ap.add_argument("--redo", default=None, help="re-process video ID(s), comma separated (clears cache + old output)")
     ap.add_argument("--name-template", default=None, help='per-video path template, e.g. "{channel}/{title} [{id}]"')
     ap.add_argument("--profile", default=None, help="config profile name (or YT2MD_PROFILE)")
-    ap.add_argument("--split-words", type=int, default=0, help="auto-split finished file into N-word parts (0=off)")
+    ap.add_argument("--split-words", type=int, default=None, help="auto-split finished file into N-word parts (0=off)")
     ap.add_argument("--jsonl", action="store_true", help="also append one JSON line per video to <out>.jsonl")
     ap.add_argument("--pdf", action="store_true", help="also write PDF next to the Markdown (needs fpdf2)")
     ap.add_argument("--epub", action="store_true", help="also write EPUB next to the Markdown (stdlib, for e-readers)")
@@ -135,7 +151,7 @@ def main():
     ap.add_argument("--no-dedupe", dest="no_dedupe", action="store_true",
                     help="keep duplicate transcripts (default: skip same-text re-uploads)")
     ap.add_argument("--transcribe", action="store_true", help="transcribe captionless videos via Gemini API (needs GEMINI_API_KEY)")
-    ap.add_argument("--engine", default="api", help="transcribe engine: api or local (whisper.cpp extra)")
+    ap.add_argument("--engine", default=None, help="transcribe engine: api or local (whisper.cpp extra)")
     ap.add_argument("--yes", action="store_true", help="auto-answer yes to extra download prompts")
     ap.add_argument("--summarize", action="store_true", help="add Gemini summary per video (needs GEMINI_API_KEY)")
     ap.add_argument("--translate", default=None, help="translate transcript to LANG via Gemini (needs GEMINI_API_KEY), e.g. tr")
@@ -160,6 +176,21 @@ def main():
         return
     if a.bilingual and a.translate:
         ap.error("--bilingual and --translate are mutually exclusive")
+    if a.resume_last:
+        if a.urls:
+            ap.error("--resume-last takes no URLs (it re-runs the saved job)")
+        if a.redo:
+            ap.error("--resume-last cannot be combined with --redo")
+        if a.fresh:
+            ap.error("--resume-last cannot be combined with --fresh (it resumes progress)")
+        if any(s == "-o" or s == "--out" or s.startswith("--out=") for s in sys.argv[2:]):
+            ap.error("--resume-last cannot be combined with -o/--out (it resumes the saved file)")
+        if any(s == "-d" or s == "--dir" or s.startswith("--dir=") for s in sys.argv[2:]):
+            ap.error("--resume-last cannot be combined with -d/--dir (it resumes the saved folder)")
+    if a.tui and (a.urls or a.redo or a.resume_last or a.dry_run or a.fresh):
+        ap.error("--tui takes no URLs or job flags (it asks interactively)")
+    if a.dry_run and a.redo:
+        ap.error("--dry-run cannot be combined with --redo (--redo clears cache + output)")
     if a.out == "-":
         bad = []
         if a.pdf:
@@ -168,6 +199,8 @@ def main():
             bad.append("--epub")
         if a.srt:
             bad.append("--srt")
+        if a.txt:
+            bad.append("--txt")
         if (a.split_words or 0) > 0:
             bad.append("--split-words")
         if (a.layout or "single") != "single":
@@ -189,10 +222,20 @@ def main():
         print(f"Warning: unknown --layout '{a.layout}', using single.")
     cfg = resolve_config({"outdir": a.dir, "layout": a.layout, "lang": a.lang,
                           "chunk": a.chunk, "timestamps": a.timestamps,
-                          "chunk_cooldown_min": (a.chunk_cooldown // 60
-                                                 if a.chunk_cooldown is not None else None),
+                          "chunk_cooldown_min": None,
                           "template": a.name_template, "clean": a.clean,
                           "clean_level": a.clean_level}, profile)
+    max_n = max(1, a.max if a.max is not None else 100)
+    sleep = max(0.0, a.sleep if a.sleep is not None else 2.0)
+    chunk_cooldown = max(0, (a.chunk_cooldown if a.chunk_cooldown is not None
+                             else cfg["chunk_cooldown_min"] * 60))
+    if a.engine is not None and a.engine not in ("api", "local"):
+        print(f"Warning: unknown --engine '{a.engine}', using api.")
+    engine = a.engine if a.engine in ("api", "local") else "api"
+    if a.clean_level is not None and a.clean_level not in ("light", "full"):
+        print(f"Warning: unknown --clean-level '{a.clean_level}', using {cfg['clean_level']}.")
+    clean_level = a.clean_level if a.clean_level in ("light", "full") else cfg["clean_level"]
+    split_words = max(0, a.split_words if a.split_words is not None else 0)
     fetch_gap = a.fetch_gap if a.fetch_gap is not None else 10
     workers = min(4, max(1, a.workers or 1))
     if a.redo:
@@ -204,7 +247,15 @@ def main():
         a.urls = list(a.urls) + [f"https://www.youtube.com/watch?v={_v.strip()}"
                                  for _v in a.redo.split(",") if _v.strip()]
     if a.dry_run:
-        cmd_dryrun(a.urls, a.max, cfg["lang"])
+        if a.resume_last:
+            _store = load_config()
+            _last = (_store.get("last:" + profile) if profile else None) or _store.get("last")
+            if not _last or not _last.get("urls"):
+                ap.error("no saved job: run once first (resume info is stored automatically)")
+            cmd_dryrun(_last["urls"], max_n,
+                       a.lang if a.lang is not None else _last.get("lang", cfg["lang"]))
+        else:
+            cmd_dryrun(a.urls, max_n, cfg["lang"])
         return
     if a.resume_last:
         store = load_config()
@@ -213,12 +264,24 @@ def main():
             ap.error("no saved job: run once first (resume info is stored automatically)")
         if (a.bilingual or last.get("bilingual")) and (a.translate or last.get("translate")):
             ap.error("--bilingual and --translate are mutually exclusive")
-        return _exit_code(run_job(last["urls"], last.get("out", "tube2note.md"), last.get("lang", cfg["lang"]),
-                last.get("max_n", 100), last.get("sleep", 2.0), False, last.get("chunk", 50),
-                last.get("chunk_cooldown", 600), a.throttle_cooldown,
-                outdir=last.get("outdir", "."), ts=last.get("ts", False),
-                split_words=(a.split_words or last.get("split_words", 0)), verbose=a.verbose,
-                layout=last.get("layout", "single"), template=last.get("template", ""),
+        r_layout = a.layout if a.layout is not None else last.get("layout", "single")
+        if r_layout not in ("single", "videos", "tree"):
+            print(f"Warning: unknown --layout '{a.layout}', using single.")
+            r_layout = "single"
+        return _exit_code(run_job(last["urls"], last.get("out", "tube2note.md"),
+                a.lang if a.lang is not None else last.get("lang", cfg["lang"]),
+                max(1, a.max if a.max is not None else last.get("max_n", 100)),
+                max(0.0, a.sleep if a.sleep is not None else last.get("sleep", 2.0)),
+                False, max(0, a.chunk if a.chunk is not None else last.get("chunk", 50)),
+                max(0, (a.chunk_cooldown if a.chunk_cooldown is not None
+                        else last.get("chunk_cooldown", 600))), a.throttle_cooldown,
+                outdir=last.get("outdir", "."),
+                ts=(a.timestamps if a.timestamps is not None else last.get("ts", False)),
+                split_words=(max(0, a.split_words) if a.split_words is not None
+                             else last.get("split_words", 0)), verbose=a.verbose,
+                layout=r_layout,
+                template=(a.name_template if a.name_template is not None
+                          else last.get("template", "")),
                 pdf=(a.pdf or last.get("pdf", False)),
                 epub=(a.epub or last.get("epub", False)),
                 obsidian=(a.obsidian or last.get("obsidian", False)),
@@ -228,7 +291,10 @@ def main():
                 since=(a.since or last.get("since")),
                 translate=(a.translate or last.get("translate")),
                 bilingual=(a.bilingual or last.get("bilingual")),
-                clean=last.get("clean", True), clean_level=(a.clean_level or last.get("clean_level", "full")),                link_timestamps=(a.link_timestamps if a.link_timestamps is not None
+                clean=(a.clean if a.clean is not None else last.get("clean", True)),
+                clean_level=(a.clean_level if a.clean_level in ("light", "full")
+                             else last.get("clean_level", "full")),
+                link_timestamps=(a.link_timestamps if a.link_timestamps is not None
                                  else last.get("link_timestamps", False)),
                 srt=(a.srt if a.srt is not None else last.get("srt", False)),
                 ts_every=(a.ts_every if a.ts_every is not None else last.get("ts_every", 0)),
@@ -238,19 +304,21 @@ def main():
                 transcribe=(a.transcribe or last.get("transcribe", False)),
                 summarize=(a.summarize or last.get("summarize", False)),
                 gemini_model=(a.gemini_model or last.get("gemini_model")),
-                engine=getattr(a, "engine", "api") if getattr(a, "engine", "api") != "api" else last.get("engine", "api"),
+                engine=(a.engine if a.engine in ("api", "local")
+                        else last.get("engine", "api")),
                 fetch_gap=(a.fetch_gap if a.fetch_gap is not None else last.get("fetch_gap", 10)),
-                workers=(a.workers if a.workers not in (None, 1) else last.get("workers", 1)),
+                workers=min(4, max(1, (a.workers if a.workers is not None
+                                       else last.get("workers", 1)) or 1)),
                 profile=profile, auto_yes=a.yes))
-    return _exit_code(run_job(a.urls, a.out, cfg["lang"], a.max, a.sleep, a.fresh, cfg["chunk"],
-            cfg["chunk_cooldown_min"] * 60, a.throttle_cooldown, outdir=cfg["outdir"],
-            ts=cfg["timestamps"], split_words=a.split_words, verbose=a.verbose,
+    return _exit_code(run_job(a.urls, a.out, cfg["lang"], max_n, sleep, a.fresh, cfg["chunk"],
+            chunk_cooldown, a.throttle_cooldown, outdir=cfg["outdir"],
+            ts=cfg["timestamps"], split_words=split_words, verbose=a.verbose,
             layout=cfg["layout"], template=cfg["template"], pdf=a.pdf,
             proxy=a.proxy, cookiefile=a.cookies, since=a.since, profile=profile,
             fetch_gap=fetch_gap, workers=workers, clean=cfg["clean"],
-            clean_level=a.clean_level or cfg["clean_level"],
+            clean_level=clean_level,
             transcribe=a.transcribe, summarize=a.summarize,
-            gemini_model=a.gemini_model or _GEMINI_MODEL, engine=a.engine,
+            gemini_model=a.gemini_model or _GEMINI_MODEL, engine=engine,
             translate=a.translate, bilingual=a.bilingual, auto_yes=a.yes,
             link_timestamps=bool(a.link_timestamps), srt=bool(a.srt), epub=a.epub,
             ts_every=(a.ts_every or 0), single_line=bool(a.single_line), txt=bool(a.txt),

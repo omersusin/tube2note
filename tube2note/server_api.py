@@ -25,7 +25,10 @@ if not TOK:  # fail closed: random per-boot token, like `serve` (never run open)
 BASE = os.path.abspath(os.environ.get("OUT_DIR", "tube2note-out"))
 HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 JOBS = {}  # ip -> (Job, timestamp)
-MAX_JOBS = int(os.environ.get("BACKEND_MAX_JOBS", "4"))  # global cap: no fork-bombs via spoofed IP headers
+try:
+    MAX_JOBS = max(1, min(32, int(os.environ.get("BACKEND_MAX_JOBS", "4"))))
+except (TypeError, ValueError):
+    MAX_JOBS = 4  # global cap: no fork-bombs via spoofed IP headers
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"],
@@ -38,7 +41,8 @@ async def _err_json(request, exc):
                         content={"error": str(exc.detail), "detail": str(exc.detail)})
 
 def _auth(tok):
-    if tok != TOK:
+    import secrets
+    if not isinstance(tok, str) or not secrets.compare_digest(tok, TOK):
         raise HTTPException(401, "bad token")
 
 def _ok(u):
@@ -71,6 +75,8 @@ async def start(req: Request, x_token: Optional[str] = Header(None)):
         p = json.loads(body or b"{}")
     except ValueError:
         raise HTTPException(400, "invalid JSON")
+    if not isinstance(p, dict):
+        raise HTTPException(400, "JSON body must be an object")
     urls = p.get("urls") or []
     if isinstance(urls, str):
         urls = urls.split()

@@ -1,4 +1,14 @@
-[![version v0.16.0](https://img.shields.io/badge/version-v0.16.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.16.0)
+[![version v0.17.0](https://img.shields.io/badge/version-v0.17.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.17.0)
+
+## v0.16.0
+bd52dfd 0.16.0: ts-every, single-line, txt sidecars (v16 pack)
+e444b44 Tauri: explicit icon array, tags-only trigger
+03e6537 Tauri: RGBA icon + full icon set
+156ddef Brand v1: designed mark (play+lines), PWA/tauri/favicon icons, concept board
+1490db9 Tauri: app icons
+c453905 Tauri: add build.rs + tauri-build dep
+50af3c9 Tauri CI: mkdir binaries before move
+c87f7f7 Tauri CI: bash shell for sidecar move (Windows pwsh fix)
 
 ## v0.15.0
 246449e 0.15.0: jsonl, stdout pipe, bilingual, retry-after, watch daemon, tauri scaffold

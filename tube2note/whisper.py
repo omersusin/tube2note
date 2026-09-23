@@ -35,6 +35,9 @@ def whisper_model_path(name="tiny"):
 
 
 def ensure_whisper_model(name="tiny", auto_yes=False):
+    if name not in WHISPER_MODEL_URLS:
+        print(f"unknown whisper model '{name}' (available: {', '.join(sorted(WHISPER_MODEL_URLS))})")
+        return None
     p = whisper_model_path(name)
     if os.path.exists(p):
         _check_model_size(p, name)
@@ -49,8 +52,12 @@ def ensure_whisper_model(name="tiny", auto_yes=False):
             return None
     import subprocess
     print(f"Downloading {name} model...")
-    r = subprocess.run(["curl", "-L", "-o", p, WHISPER_MODEL_URLS[name]],
-                       capture_output=True, text=True)
+    try:
+        r = subprocess.run(["curl", "-L", "-o", p, WHISPER_MODEL_URLS[name]],
+                           capture_output=True, text=True)
+    except (FileNotFoundError, subprocess.SubprocessError) as e:
+        print(f"No curl ({e}). Get it manually: {WHISPER_MODEL_URLS[name]} -> {p}")
+        return None
     if r.returncode != 0 or not os.path.exists(p):
         print(f"Model download failed. Get it manually: {WHISPER_MODEL_URLS[name]}")
         return None
@@ -69,7 +76,8 @@ def _check_model_size(p, name):
         pass
 
 
-def _local_transcribe(vid, lang, tmpdir, model="tiny", auto_yes=False):
+def _local_transcribe(vid, lang, tmpdir, model="tiny", auto_yes=False,
+                      proxy=None, cookiefile=None):
     """Captionless fallback via external whisper.cpp. Returns (text, note) or (None, reason)."""
     import subprocess
     binary, hint = find_whisper()
@@ -80,7 +88,7 @@ def _local_transcribe(vid, lang, tmpdir, model="tiny", auto_yes=False):
     model_path = ensure_whisper_model(model, auto_yes)
     if not model_path:
         return None, "whisper model missing"
-    path, ext = _download_audio(vid, tmpdir)
+    path, ext = _download_audio(vid, tmpdir, proxy=proxy, cookiefile=cookiefile)
     if path is None:
         return None, ext
     try:
@@ -97,7 +105,11 @@ def _local_transcribe(vid, lang, tmpdir, model="tiny", auto_yes=False):
         out = stem + ".txt"
         if r.returncode != 0 or not os.path.exists(out):
             return None, "whisper.cpp failed"
-        text = open(out, encoding="utf-8").read().strip()
+        try:
+            with open(out, encoding="utf-8") as f:
+                text = f.read().strip()
+        except OSError:
+            return None, "whisper.cpp failed"
         if len(text) < 50:
             return None, "transcript too short"
         return text, f"transcribed locally (whisper.cpp {model})"

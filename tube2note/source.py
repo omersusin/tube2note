@@ -31,6 +31,9 @@ def _parse_since(s):
 
 def _flatten(ydl, info, out, limit, depth=0, since_ts=0):
     """Channel -> tabs (Videos/Shorts/Live) -> videos, stopping at limit (so --max saves time)."""
+    limit = limit or 100
+    if not isinstance(info, dict):
+        return
     if len(out) >= limit:
         return
     entries = info.get("entries")
@@ -48,9 +51,20 @@ def _flatten(ydl, info, out, limit, depth=0, since_ts=0):
             return
         if e is None:
             continue
+        if isinstance(e, str):  # bare URL strings in flat playlists
+            if ydl is not None and len(out) < limit:
+                try:
+                    sub = ydl.extract_info(e, download=False)
+                except Exception:
+                    continue
+                if sub:
+                    _flatten(ydl, sub, out, limit, depth + 1, since_ts)
+            continue
+        if not isinstance(e, dict):
+            continue
         if e.get("entries"):
             _flatten(ydl, e, out, limit, depth + 1, since_ts)
-        elif e.get("ie_key") == "Youtube" or len(e.get("id", "")) == 11:
+        elif e.get("ie_key") == "Youtube" or len(e.get("id") or "") == 11:
             ts = e.get("timestamp") or e.get("release_timestamp") or 0
             if since_ts and ts and ts < since_ts:
                 continue
@@ -58,7 +72,7 @@ def _flatten(ydl, info, out, limit, depth=0, since_ts=0):
             out.append({"id": vid, "title": e.get("title") or vid,
                         "channel": e.get("channel") or e.get("uploader"),
                         "url": f"https://www.youtube.com/watch?v={vid}"})
-        elif depth < 2 and e.get("url"):
+        elif depth < 3 and e.get("url") and ydl is not None:
             try:
                 sub = ydl.extract_info(e["url"], download=False)
             except Exception:
@@ -81,12 +95,14 @@ def _list_cache_path(urls, since):
 def _list_load(urls, max_n, since):
     try:
         d = json.load(open(_list_cache_path(urls, since), encoding="utf-8"))
-        age = time.time() - d.get("ts", 0)
+        if not isinstance(d, dict):
+            return None
+        age = time.time() - (d.get("ts", 0) or 0)
         ttl = _LIST_TTL if d.get("complete") else _LIST_INCOMPLETE_TTL
         if (age < ttl and isinstance(d.get("videos"), list)
-                and (d.get("complete") or d.get("max_n", 0) >= max_n)):
+                and (d.get("complete") or (d.get("max_n", 0) or 0) >= (max_n or 100))):
             return d["videos"][:max_n], d.get("hint")
-    except (OSError, ValueError, TypeError, KeyError):
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
         pass
     return None
 
@@ -97,19 +113,21 @@ def _list_save(urls, max_n, since, videos, hint, complete):
     try:
         p = _list_cache_path(urls, since)
         os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = p + ".tmp"
         json.dump({"ts": time.time(), "max_n": max_n, "complete": complete,
                    "videos": videos, "hint": hint},
-                  open(p, "w", encoding="utf-8"))
+                  open(tmp, "w", encoding="utf-8"))
+        os.replace(tmp, p)
     except (OSError, ValueError, TypeError):
         pass
 
 
 def _channel_id(url, cookies_from_browser=None):
     """UC-id straight from /channel/ URLs; single cheap lookup otherwise. None if not a channel."""
-    m = re.search(r"/channel/(UC[\w-]{22})", url or "")
+    m = re.search(r"/channel/(UC[\w-]{22})(?![\w-])", url or "")
     if m:
         return m.group(1)
-    if not re.search(r"/@[^/]+|/c/[^/]+|/user/[^/]+", url or ""):
+    if not re.search(r"youtube\.com/(@|c/|user/)|youtu\.be/", url or ""):
         return None
     try:
         opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "socket_timeout": 20}
@@ -121,6 +139,21 @@ def _channel_id(url, cookies_from_browser=None):
         return cid if re.fullmatch(r"UC[\w-]{22}", cid) else None
     except Exception:
         return None
+
+
+def _parse_rss_ts(s):
+    """YouTube RSS published -> epoch. Handles Zulu, offsets, and bare forms."""
+    s = (s or "").strip()
+    if not s:
+        return 0
+    try:
+        return datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        pass
+    try:
+        return datetime.datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").timestamp()
+    except (ValueError, TypeError):
+        return 0
 
 
 def rss_videos(url, since_ts, max_n=100, opener=None, cookies_from_browser=None):
@@ -135,11 +168,16 @@ def rss_videos(url, since_ts, max_n=100, opener=None, cookies_from_browser=None)
         req = _make_req(f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}")
         ctx = opener(req) if opener else urllib.request.urlopen(req, timeout=20)
         with ctx as r:
-            data = r.read().decode("utf-8", errors="ignore")
+            raw = r.read()
+        data = (raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw or ""))
+        data = data.lstrip("﻿")
+        if not data.strip():
+            return None
         import xml.etree.ElementTree as ET
         ns = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
         root = ET.fromstring(data)
-        chan = (root.find("a:title", ns).text if root.find("a:title", ns) is not None else "")
+        title_el = root.find("a:title", ns)
+        chan = title_el.text if title_el is not None else ""
         out = []
         for e in root.findall("a:entry", ns):
             vid = e.find("yt:videoId", ns)
@@ -147,17 +185,16 @@ def rss_videos(url, since_ts, max_n=100, opener=None, cookies_from_browser=None)
             title = e.find("a:title", ns)
             if vid is None or pub is None:
                 continue
-            try:
-                ts = datetime.datetime.strptime(pub.text[:19], "%Y-%m-%dT%H:%M:%S").timestamp()
-            except (ValueError, TypeError):
+            vid = (vid.text or "").strip()
+            if not vid:
                 continue
-            if ts < since_ts:
+            ts = _parse_rss_ts(pub.text)
+            if not ts or ts < since_ts:
                 continue
-            vid = vid.text.strip()
             out.append({"id": vid, "title": (title.text if title is not None else vid) or vid,
                         "channel": chan or None,
                         "url": f"https://www.youtube.com/watch?v={vid}"})
-            if len(out) >= max_n:
+            if len(out) >= (max_n or 100):
                 break
         return out
     except Exception:
@@ -223,7 +260,10 @@ def _make_req(url):
 
 def fetch_vtt(formats, opener=None):
     """Try each format in order (vtt first). One dead mirror must not kill the video."""
-    want = [f for f in formats if f.get("ext") == "vtt"] or list(formats)
+    want = [f for f in (formats or []) if isinstance(f, dict) and f.get("url")] or []
+    if not want and formats:
+        want = [f for f in formats if isinstance(f, dict) and f.get("url")]
+    want = [f for f in want if f.get("ext") == "vtt"] or want
     last = None
     for f in want:
         try:
@@ -283,15 +323,18 @@ def _get_vtt(vid, lg, auto, fmts, opener, fetch_gap=10):
             if "-->" in cached:
                 return cached, True
             os.unlink(p)  # poisoned cache (error page, not captions): refetch
-        except OSError:
+        except (OSError, ValueError):
             pass
-    time.sleep(random.uniform(1, max(1, fetch_gap)))  # pace timedtext fetches only
+    if fetch_gap > 0:
+        time.sleep(random.uniform(1, max(1, fetch_gap)))  # pace timedtext fetches only
     vtt = fetch_vtt(fmts, opener)
     if "-->" not in vtt:
         return vtt, False  # not captions: don't cache poison, caller skips the video
     try:
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        open(p, "w", encoding="utf-8").write(vtt)
+        tmp = p + ".tmp"
+        open(tmp, "w", encoding="utf-8").write(vtt)
+        os.replace(tmp, p)
     except OSError:
         pass
     return vtt, False

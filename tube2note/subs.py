@@ -6,16 +6,17 @@ Format:
   since: 2024-01-01
 Lines starting with # ignored. Minimal key: value per indent block.
 """
-import os
 
 
 def load_subs(path="subscriptions.yaml"):
-    if not os.path.exists(path):
+    try:
+        f = open(path, encoding="utf-8-sig")  # -sig: tolerate Windows Notepad BOM
+    except OSError:
         return []
     subs, cur = [], {}
-    with open(path, encoding="utf-8-sig") as f:  # -sig: tolerate Windows Notepad BOM
+    with f:
         for raw in f:
-            ln = raw.rstrip("\n")
+            ln = raw.rstrip("\r\n")
             if not ln.strip() or ln.strip().startswith("#"):
                 continue
             if ln.lstrip().startswith("- "):  # tolerate indented list items

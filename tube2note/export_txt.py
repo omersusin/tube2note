@@ -1,10 +1,13 @@
 """Markdown transcript -> clean plain text. Pure, no deps."""
 import re
 
-_LINK_RE = re.compile(r"\[([^\]]+)\]\((?:https://youtu\.be/[^)]+)\)")
+_LINK_RE = re.compile(r"\[([^\]]+)\]\((?:https?://[^)]+)\)")
+_IMG_RE = re.compile(r"!\[([^\]]*)\]\((?:https?://[^)]+)\)")
+
 
 def to_txt(text):
     """Strip md chrome, keep readable text + plain MM:SS markers."""
+    text = _IMG_RE.sub(r"\1", text)
     text = _LINK_RE.sub(r"[\1]", text)
     out = []
     for ln in text.splitlines():
@@ -27,4 +30,5 @@ def to_txt(text):
             out.append(s[2:].strip())
             continue
         out.append(s)
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip() + "\n"
+    txt = re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+    return txt + "\n" if txt else ""

@@ -49,6 +49,10 @@ def _purge_video(out, root, layout, vid):
             from .store import Store
             st = Store(db)
             st.cx.execute("DELETE FROM videos WHERE id=?", (vid,))
+            try:
+                st.cx.execute("DELETE FROM hashes WHERE vid=?", (vid,))
+            except Exception:
+                pass
             st.cx.commit()
             st.close()
             removed.append("resume-db")
@@ -62,6 +66,37 @@ def _purge_video(out, root, layout, vid):
             if len(kept) != len(lines):
                 open(done_log, "w", encoding="utf-8").write("\n".join(kept) + ("\n" if kept else ""))
                 removed.append("done-log")
+        except OSError:
+            pass
+    skip_log = out + ".skip"
+    if os.path.exists(skip_log):
+        try:
+            lines = open(skip_log, encoding="utf-8").read().splitlines()
+            kept = []
+            changed = False
+            for ln in lines:
+                s = ln.strip()
+                if not s:
+                    kept.append(ln)
+                    continue
+                hit = None
+                try:
+                    d = json.loads(s)
+                    u = d.get("url") or ""
+                    m = re.search(r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)"
+                                  r"([A-Za-z0-9_-]{11})", u)
+                    hit = (m.group(1) if m else u) == vid
+                except ValueError:
+                    m = re.search(r"(?:[?&]v=|youtu\.be/|/shorts/|/embed/|/live/)"
+                                  r"([A-Za-z0-9_-]{11})", s)
+                    hit = (m.group(1) == vid) if m else (vid in s)
+                if hit:
+                    changed = True
+                    continue
+                kept.append(ln)
+            if changed:
+                open(skip_log, "w", encoding="utf-8").write("\n".join(kept) + ("\n" if kept else ""))
+                removed.append("skip-log")
         except OSError:
             pass
     cdir = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
@@ -94,6 +129,23 @@ def _purge_video(out, root, layout, vid):
                         removed.append("per-video-file")
                     except OSError:
                         pass
+                    for ext in (".srt", ".txt"):
+                        side = os.path.splitext(p)[0] + ext
+                        try:
+                            if os.path.exists(side):
+                                os.remove(side)
+                                removed.append("sidecar")
+                        except OSError:
+                            pass
+    base = os.path.splitext(os.path.basename(out))[0]
+    for ext in (".srt", ".txt"):
+        side = os.path.join(root, f"{base}_{vid}{ext}")
+        try:
+            if os.path.exists(side):
+                os.remove(side)
+                removed.append("sidecar")
+        except OSError:
+            pass
     return removed
 
 
@@ -131,7 +183,7 @@ def split_output(out, budget):
 def _frontmatter(title, wurl, channel, vid, lg, auto, meta=None, obsidian=False):
     def clean(s):
         s = " ".join(str(s).split()).replace('"', "'").replace("\\", "/")
-        return s.lstrip("-?:,{}[]&*!|>#%@` ").strip() or "unknown"
+        return s.strip() or "unknown"
     t = clean(title or vid)
     c = clean(channel or "unknown")
     out = (f"---\ntitle: \"{t}\"\nsource: {wurl}\nchannel: \"{c}\"\n"
@@ -221,7 +273,12 @@ def _write_index(root, videos, completed, words_by_id, reasons):
     rows = []
     for v in videos:
         vid = v["id"]
-        st = "done" if vid in completed else reasons.get(vid, "pending")
+        if vid in completed:
+            st = "done"
+        elif vid in reasons:
+            st = reasons[vid] or "skipped"
+        else:
+            st = "pending"
         rows.append([v.get("title") or vid, st, str(words_by_id.get(vid, "-"))])
     with open(os.path.join(root, "INDEX.md"), "w", encoding="utf-8") as f:
         f.write(f"# Index\n\n- Videos: {len(videos)}\n- Done: {len(completed)}\n\n")

@@ -9,7 +9,8 @@ def is_first_run():
         return False
     try:
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        open(p, "w").write("1")
+        with open(p, "w") as f:
+            f.write("1")
     except OSError:
         return False
     return True
@@ -31,10 +32,10 @@ ENV_MAP = {"outdir": "YT2MD_OUTDIR", "layout": "YT2MD_LAYOUT", "lang": "YT2MD_LA
 
 def load_config():
     """Config file: {"defaults": {...}, "profiles": {name: {...}}}. Old flat files count as defaults."""
-    """Config file: {"defaults": {...}, "profiles": {name: {...}}}. Old flat files count as defaults."""
     raw = {}
     try:
-        data = json.load(open(CONFIG_PATH, encoding="utf-8"))
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            data = json.load(f)
         if isinstance(data, dict):
             raw = data
     except (OSError, ValueError, TypeError):
@@ -56,7 +57,8 @@ def load_config():
 
 def save_config(store):
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    json.dump(store, open(CONFIG_PATH, "w", encoding="utf-8"), indent=2)
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(store, f, indent=2)
 
 
 def _merge(base, store, profile, flags, env):
@@ -96,5 +98,5 @@ def _save_last(profile=None, **kw):
         store = load_config()
         store["last:" + profile if profile else "last"] = kw
         save_config(store)
-    except OSError:
+    except (OSError, TypeError, ValueError):
         pass

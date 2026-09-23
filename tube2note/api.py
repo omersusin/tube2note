@@ -9,14 +9,15 @@ def collect(urls, out="tube2note.md", profile=None, overrides=None, **kw):
     """One-call collection. Returns (exit_code, result_dict). All kwargs optional."""
     cfg = resolve_config(overrides or {}, profile)
     res = run_job(list(urls), out,
-        kw.get("lang", cfg["lang"]), kw.get("max_n", 100),
+        kw.get("lang", cfg["lang"]), kw.get("max_n", kw.get("max", 100)),
         kw.get("sleep", 2.0), kw.get("fresh", False),
         kw.get("chunk", cfg["chunk"]), kw.get("chunk_cooldown", cfg["chunk_cooldown_min"] * 60),
         kw.get("throttle_cooldown", 1800),
         outdir=kw.get("outdir", cfg["outdir"]), ts=kw.get("ts", cfg["timestamps"]),
         split_words=kw.get("split_words", 0), verbose=kw.get("verbose", False),
         layout=kw.get("layout", cfg["layout"]), template=kw.get("template", cfg["template"]),
-        pdf=kw.get("pdf", False), proxy=kw.get("proxy"), cookiefile=kw.get("cookies"),
+        pdf=kw.get("pdf", False), proxy=kw.get("proxy"),
+        cookiefile=kw.get("cookiefile", kw.get("cookies")),
         since=kw.get("since"), profile=profile,
         fetch_gap=kw.get("fetch_gap", 10), workers=kw.get("workers", 1),
         clean=kw.get("clean", cfg["clean"]), clean_level=kw.get("clean_level", cfg["clean_level"]),
@@ -26,6 +27,8 @@ def collect(urls, out="tube2note.md", profile=None, overrides=None, **kw):
         link_timestamps=kw.get("link_timestamps", False), srt=kw.get("srt", False),
         epub=kw.get("epub", False), dedupe=kw.get("dedupe", True),
         obsidian=kw.get("obsidian", False), jsonl=kw.get("jsonl", False),
+        ts_every=kw.get("ts_every", 0), single_line=kw.get("single_line", False),
+        txt=kw.get("txt", False), videos=kw.get("videos"),
         cookies_from_browser=kw.get("cookies_from_browser"))
     return _exit_code(res), (res or {})
 

@@ -5,6 +5,7 @@ Build: `flet build apk` (CI builds it — see .github/workflows/flet.yml).
 """
 import asyncio
 import os
+import re
 
 import flet as ft
 
@@ -13,19 +14,24 @@ import tube2note.api as api
 
 def _diag():
     """One-line startup diagnostics (decides storage/SSL questions on device)."""
-    import sqlite3  # noqa: F401  (probe import)
+    try:
+        import sqlite3  # noqa: F401  (probe import)
 
-    import yt_dlp
+        import yt_dlp
+        yv = yt_dlp.version.__version__
+    except Exception:
+        yv = "?"
     try:
         import certifi
         cafile = certifi.where()
     except Exception:
         cafile = "missing"
+    fv = getattr(ft, "__version__", "?")
     return (f"HOME={os.environ.get('HOME')} XDG_CACHE={os.environ.get('XDG_CACHE_HOME')} "
             f"cwd={os.getcwd()} ~={os.path.expanduser('~')} "
             f"DATA={os.environ.get('FLET_APP_STORAGE_DATA')} "
             f"CACHE={os.environ.get('FLET_APP_STORAGE_CACHE')} "
-            f"cafile={cafile} yt-dlp={yt_dlp.version.__version__} flet={ft.__version__}")
+            f"cafile={cafile} yt-dlp={yv} flet={fv}")
 
 
 def _outdir():
@@ -81,9 +87,11 @@ def main(page: ft.Page):
     files_list = ft.Text("", selectable=True)
 
     def out_file():
+        from tube2note.naming import sanitize_filename
         name = (out_name.value or "").strip()
         if not name:
             return ""  # resolved from video title at run time
+        name = sanitize_filename(name) or "tube2note"
         return name if name.lower().endswith(".md") else name + ".md"
 
     async def resolve_name(urls):
@@ -105,34 +113,52 @@ def main(page: ft.Page):
             items = []
         rows = []
         for f in items:
-            if f.endswith(".md"):
+            if f.startswith("."):
+                continue
+            if f.lower().endswith((".md", ".pdf", ".epub")):
                 try:
                     kb = os.path.getsize(os.path.join(d, f)) // 1024
                 except OSError:
                     kb = 0
                 rows.append(f"{f} ({kb} KB)")
         files_list.value = "Files:\n" + ("\n".join(rows) if rows else "Nothing here yet.")
+        page.update()
 
     async def do_preview(_):
+        go.disabled = True
+        preview.disabled = True
         urls = [u for u in (url.value or "").replace(",", " ").split() if u]
         if not urls:
             log.value = "Paste a YouTube link first."
+            go.disabled = False
+            preview.disabled = False
             page.update()
             return
         log.value = "Listing..."
         page.update()
         try:
-            vids, _hint = await asyncio.to_thread(api.list_videos, urls, 100, None)
-            langs = await asyncio.to_thread(api.language_hint, vids)
-            sug = langs[0] if isinstance(langs, tuple) else langs
-            log.value = (f"Preview: {len(vids)} videos, languages: {sug}\n"
-                         f"Output: {out_file() or 'auto (video title)'}")
+            since_s = (since.value or "").strip() or None
+            if since_s and not re.match(r"^\d{4}-\d{2}-\d{2}$", since_s):
+                log.value = "Since must be YYYY-MM-DD."
+            else:
+                try:
+                    n = min(5000, max(1, int(max_n.value or 20)))
+                except (TypeError, ValueError):
+                    n = 20
+                vids, _hint = await asyncio.to_thread(api.list_videos, urls, n, since_s)
+                langs = await asyncio.to_thread(api.language_hint, vids)
+                sug = langs[0] if isinstance(langs, tuple) else langs
+                log.value = (f"Preview: {len(vids)} videos, languages: {sug}\n"
+                             f"Output: {out_file() or 'auto (video title)'}")
         except Exception as e:  # noqa: BLE001
             log.value = f"Preview failed: {e}"
+        go.disabled = False
+        preview.disabled = False
         page.update()
 
     async def run(_):
         go.disabled = True
+        preview.disabled = True
         bar.visible = True
         log.value = "Working..."
         page.update()
@@ -140,36 +166,54 @@ def main(page: ft.Page):
         if not urls:
             log.value = "Paste a YouTube link first."
             go.disabled = False
+            preview.disabled = False
             bar.visible = False
             page.update()
             return
         outdir = _outdir()
         if (gemini_key.value or "").strip():
             os.environ["GEMINI_API_KEY"] = gemini_key.value.strip()
-        ai = {"transcribe": tr_transcribe.value, "summarize": tr_summarize.value,
+        ai = {"transcribe": bool(tr_transcribe.value), "summarize": bool(tr_summarize.value),
               "translate": (tr_translate.value or "").strip() or None}
-        try:
-            n = max(1, int(max_n.value or 20))
-            split = max(0, int(split_n.value or 0))
-            wk = min(4, max(1, int(workers_n.value or 1)))
-        except ValueError:
-            log.value = "Max videos / split / workers must be numbers."
+        if (ai["transcribe"] or ai["summarize"] or ai["translate"]) and not os.environ.get("GEMINI_API_KEY"):
+            log.value = "AI needs a GEMINI_API_KEY (free at aistudio.google.com) — paste it above."
             go.disabled = False
+            preview.disabled = False
             bar.visible = False
             page.update()
             return
+        try:
+            n = min(5000, max(1, int(max_n.value or 20)))
+            split = min(500000, max(0, int(split_n.value or 0)))
+            wk = min(4, max(1, int(workers_n.value or 1)))
+        except (TypeError, ValueError):
+            log.value = "Max videos / split / workers must be numbers (max 1-5000, split 0-500000, workers 1-4)."
+            go.disabled = False
+            preview.disabled = False
+            bar.visible = False
+            page.update()
+            return
+        since_s = (since.value or "").strip() or None
+        if since_s and not re.match(r"^\d{4}-\d{2}-\d{2}$", since_s):
+            log.value = "Since must be YYYY-MM-DD."
+            go.disabled = False
+            preview.disabled = False
+            bar.visible = False
+            page.update()
+            return
+        lay = layout.value if layout.value in ("single", "videos", "tree") else "single"
         try:
             fname = await resolve_name(urls)
             code, res = await asyncio.to_thread(
                 api.collect, urls, fname,
                 None, {"outdir": outdir},
-                **{"lang": lang.value or "tr,en", "max_n": n, "verbose": False,
-                   "layout": layout.value or "single",
-                   "since": since.value.strip() or None,
+                **{"lang": (lang.value or "tr,en").strip() or "tr,en", "max_n": n, "verbose": False,
+                   "layout": lay,
+                   "since": since_s,
                    "split_words": split, "workers": wk,
-                   "ts": timestamps.value, "link_timestamps": link_ts.value,
-                   "srt": srt.value, "clean": clean.value,
-                   "pdf": pdf.value, "epub": epub.value,
+                   "ts": bool(timestamps.value), "link_timestamps": bool(link_ts.value),
+                   "srt": bool(srt.value), "clean": bool(clean.value),
+                   "pdf": bool(pdf.value), "epub": bool(epub.value),
                    **ai},
             )
             log.value = (f"Done: {res.get('ok', 0)}/{res.get('total', 0)} videos.\n"
@@ -179,13 +223,14 @@ def main(page: ft.Page):
             log.value = f"Failed: {e}"
         refresh_files()
         go.disabled = False
+        preview.disabled = False
         bar.visible = False
         page.update()
 
     go.on_click = run
     preview.on_click = do_preview
     page.add(
-        ft.Text("tube2note", size=28, weight="bold"),
+        ft.Text("tube2note", size=28, weight=ft.FontWeight.BOLD),
         ft.Text("YouTube to Markdown for NotebookLM", size=14),
         ft.Row([url]),
         ft.Row([out_name, lang, max_n, go]),

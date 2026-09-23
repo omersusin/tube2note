@@ -15,7 +15,10 @@ def _say(*a, **k):
 
 def slug(s, fallback="tube2note"):
     s = re.sub(r"[^a-z0-9]+", "-", sanitize_filename(s, "").lower()).strip("-")
-    return (s[:60] or fallback) + ".md"
+    s = (s[:60] or fallback) + ".md"
+    if s.split(".")[0] in WIN_RESERVED:
+        s = "_" + s
+    return s
 
 
 WIN_RESERVED = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
@@ -25,7 +28,8 @@ def sanitize_filename(s, fallback="untitled"):
     """Cross-platform safe single path segment (Windows/macOS/Linux/Android)."""
     tr = str.maketrans("şğüöçıİŞĞÜÖÇ", "sguociisguoc")
     s = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', "-", (s or "").translate(tr)).strip(" .")
-    if s.lower() in WIN_RESERVED:
+    stem = s.split(".")[0] if "." in s else s
+    if stem.lower() in WIN_RESERVED:
         s = "_" + s
     s = (s or fallback).encode("utf-8")[:200].decode("utf-8", "ignore")
     return s or fallback

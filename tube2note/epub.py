@@ -35,6 +35,7 @@ def _md_block_to_xhtml(block):
 
 
 def _inline(s):
+    s = "".join(ch for ch in s if ch == "\n" or ch == "\t" or ord(ch) >= 32)
     s = html.escape(s)
     s = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', s)
     s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
@@ -48,7 +49,13 @@ def _chapter(title, body):
 
 def md_to_epub(md_path, epub_path=None):
     """Convert a Markdown collection to EPUB. Returns the epub path."""
-    text = open(md_path, encoding="utf-8").read()
+    try:
+        with open(md_path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        raise
+    except Exception as e:
+        raise OSError(f"cannot read {md_path}: {e}")
     if epub_path is None:
         epub_path = os.path.splitext(md_path)[0] + ".epub"
     parts = re.split(r"(?m)^## ", text)
@@ -75,6 +82,7 @@ def md_to_epub(md_path, epub_path=None):
     opf_spine = "".join(f'<itemref idref="ch{i}"/>' for i in range(len(files)))
     opf = (f'<?xml version="1.0" encoding="utf-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" '
            f'version="3.0" unique-identifier="t2n"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+           f'<dc:identifier id="t2n">tube2note-{html.escape(title[:60])}</dc:identifier>'
            f"<dc:title>{html.escape(title)}</dc:title><dc:creator>tube2note</dc:creator>"
            f'<dc:language>en</dc:language></metadata><manifest><item id="nav" href="nav.xhtml" '
            f'media-type="application/xhtml+xml" properties="nav"/>'

@@ -70,7 +70,8 @@ def cmd_setup(advanced=False):
                                                     or cfg["chunk_cooldown_min"]))
         except ValueError:
             pass
-        cfg["template"] = input(f"Name template [{cfg['template'] or 'layout default'}] > ").strip()
+        cfg["template"] = input(f"Name template [{cfg['template'] or 'layout default'}] > ").strip() \
+            or cfg["template"]
     store["defaults"] = {k: cfg[k] for k in DEFAULTS if k in cfg}
     name = input("Save as profile name [skip] > ").strip()
     if name:
@@ -88,7 +89,8 @@ def tui():
     if is_first_run():
         show_guide()
         if input("Personalize defaults now? (folder, layout...) [Y/n] > ").strip().lower() not in ("n", "no"):
-            cfg = cmd_setup()
+            cmd_setup()
+            cfg = resolve_config(profile=prof)
     while True:
         raw = input("\nURLs (space/comma separated, several allowed) > ").strip()
         if raw.lower() in ("q", "quit", "exit"):

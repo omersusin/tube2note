@@ -26,10 +26,14 @@ Local alternative: <code>tube2note serve</code> on your machine.</p>
 <label><input id="clean" type="checkbox" checked> clean</label>
 <label><input id="transcribe" type="checkbox"> transcribe (no captions)</label>
 <label><input id="summarize" type="checkbox"> summarize</label>
-<input id="translate" placeholder="translate to: tr"></div>
+<input id="translate" placeholder="translate to: tr">
+<input id="bilingual" placeholder="bilingual: tr"></div>
+<div><label><input id="pdf" type="checkbox"> PDF</label>
+<label><input id="epub" type="checkbox"> EPUB</label>
 <input id="split" type="number" value="0" min="0" title="split every N words">
 <input id="workers" type="number" value="1" min="1" max="4"></div>
 <button id="go" type="button">Start</button>
+<button id="preview" type="button">Preview</button>
 <button id="local" type="button" title="Open the app on this machine (needs `tube2note serve` running)">Open local app</button>
 </form>
 <p id="err"></p>
