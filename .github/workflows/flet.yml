@@ -11,7 +11,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -U flet yt-dlp
+      - run: pip install -U flet yt-dlp certifi
       - run: flet build apk --yes --org com.omersusin --project tube2note --module-name mobile_main --verbose --output build-apk
       - uses: actions/upload-artifact@v4
         with:
