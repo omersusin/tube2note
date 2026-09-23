@@ -13,6 +13,12 @@ curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh
 ```
 
 **Features:** transcripts with timestamps & chapters · resume & watch mode ·
+
+## Walkthrough
+
+| Install | Preview | Download | Search |
+|---|---|---|---|
+| ![install](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-0-setup.png) | ![preview](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-3-dryrun.png) | ![download](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-4-done.png) | ![search](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-5-search.png) |
 offline search · sponsor skip · citations (APA/MLA/Chicago/BibTeX) ·
 SRT/VTT/TXT/PDF/EPUB/Anki/Obsidian exports · AI summarize/translate/transcribe ·
 web UI, mobile app, Python API & MCP server.
