@@ -92,12 +92,15 @@ def main(page: ft.Page):
     clean = ft.Checkbox(label="Clean transcripts", value=True)
     pdf = ft.Checkbox(label="Also write PDF", value=False)
     epub = ft.Checkbox(label="Also write EPUB", value=False)
-    tr_summarize = ft.Checkbox(label=f"Summarize each video ({KEY_NEED})", value=False)
-    tr_transcribe = ft.Checkbox(label=f"Transcribe videos without captions ({KEY_NEED})", value=False)
-    tr_translate = ft.TextField(label=f"Translate to (e.g. tr, empty=off, {KEY_NEED})", width=220, expand=True)
-    tr_bilingual = ft.TextField(label=f"Bilingual source+translation (e.g. tr, empty=off, {KEY_NEED})",
+    ai_note = ft.Text("AI needs a key below (free). Core download is free.",
+                      size=12, color=ft.Colors.ON_SURFACE_VARIANT)
+    tr_summarize = ft.Checkbox(label="Summarize each video", value=False)
+    tr_transcribe = ft.Checkbox(label="Transcribe videos without captions", value=False)
+    tr_translate = ft.TextField(label="Translate to (e.g. tr, empty=off)", width=220, expand=True)
+    tr_bilingual = ft.TextField(label="Bilingual (e.g. tr, empty=off)",
                                 width=220, expand=True)
-    gemini_key = ft.TextField(label="GEMINI_API_KEY (free at aistudio.google.com; core download is free)",
+    gemini_key = ft.TextField(label="GEMINI_API_KEY (free)",
+                              helper_text="Get it at aistudio.google.com",
                               password=True,
                               can_reveal_password=True, expand=True)
     log = ft.Text("", selectable=True, font_family="monospace")
@@ -284,6 +287,7 @@ def main(page: ft.Page):
                 ),
                 _section("AI (needs key)"),
                 _card(
+                    ai_note,
                     tr_transcribe, tr_summarize,
                     tr_translate, tr_bilingual,
                     gemini_key,
