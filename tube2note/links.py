@@ -30,3 +30,30 @@ def linkify(text, vid):
     """[MM:SS]/[H:MM:SS] markers -> clickable youtu.be links."""
     return re.sub(r"\[(\d+:\d{2}(?::\d{2})?)\]",
                   lambda m: link_ts(m.group(1), vid, _label_to_secs(m.group(1))), text)
+
+
+def thin_markers(text, every):
+    """Keep 1 marker per `every` seconds (0 = keep all). Works on plain
+    [MM:SS] and linked [label](...?t=Ns) markers."""
+    every = int(every or 0)
+    if every <= 0:
+        return text
+    kept = -10 ** 9
+    out = []
+    pat = re.compile(r"\[(\d+:\d{2}(?::\d{2})?)\](\((?:https://youtu\.be/[^)]+)?\))?")
+    pos = 0
+    for m in pat.finditer(text):
+        secs = _label_to_secs(m.group(1))
+        if secs - kept >= every:
+            kept = secs
+            out.append(text[pos:m.end()])
+        else:
+            out.append(text[pos:m.start()] + m.group(1))
+        pos = m.end()
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def to_single_line(text):
+    """Obsidian single-line mode: paragraphs joined, markers stay inline."""
+    return " ".join(p.strip() for p in text.split("\n\n") if p.strip())

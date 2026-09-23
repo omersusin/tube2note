@@ -110,6 +110,14 @@ def main():
                     help="write a .srt sidecar per video")
     ap.add_argument("--no-srt", dest="srt", action="store_false",
                     help="turn off .srt (e.g. on --resume-last)")
+    ap.add_argument("--ts-every", type=int, default=None,
+                    help="keep 1 timestamp per N seconds (0=all, e.g. --ts-every 30)")
+    ap.add_argument("--single-line", dest="single_line", action="store_true", default=None,
+                    help="single-line transcript, markers inline (Obsidian compact mode)")
+    ap.add_argument("--txt", dest="txt", action="store_true", default=None,
+                    help="write a .txt sidecar per video (clean text for RAG/Anki)")
+    ap.add_argument("--no-txt", dest="txt", action="store_false",
+                    help="turn off .txt (e.g. on --resume-last)")
     ap.add_argument("--clean", dest="clean", action="store_true", default=None, help="clean transcripts (default on)")
     ap.add_argument("--no-clean", dest="clean", action="store_false", help="keep raw transcripts")
     ap.add_argument("--clean-level", default=None, help="cleaning strength: light or full (default full)")
@@ -223,6 +231,9 @@ def main():
                 clean=last.get("clean", True), clean_level=(a.clean_level or last.get("clean_level", "full")),                link_timestamps=(a.link_timestamps if a.link_timestamps is not None
                                  else last.get("link_timestamps", False)),
                 srt=(a.srt if a.srt is not None else last.get("srt", False)),
+                ts_every=(a.ts_every if a.ts_every is not None else last.get("ts_every", 0)),
+                single_line=(a.single_line if a.single_line is not None else last.get("single_line", False)),
+                txt=(a.txt if a.txt is not None else last.get("txt", False)),
                 jsonl=(a.jsonl or last.get("jsonl", False)),
                 transcribe=(a.transcribe or last.get("transcribe", False)),
                 summarize=(a.summarize or last.get("summarize", False)),
@@ -242,5 +253,6 @@ def main():
             gemini_model=a.gemini_model or _GEMINI_MODEL, engine=a.engine,
             translate=a.translate, bilingual=a.bilingual, auto_yes=a.yes,
             link_timestamps=bool(a.link_timestamps), srt=bool(a.srt), epub=a.epub,
+            ts_every=(a.ts_every or 0), single_line=bool(a.single_line), txt=bool(a.txt),
             dedupe=not a.no_dedupe, obsidian=a.obsidian, jsonl=a.jsonl,
             cookies_from_browser=a.cookies_from_browser))

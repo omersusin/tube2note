@@ -201,6 +201,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             workers=1, clean=True, clean_level="full", transcribe=False, summarize=False,
             gemini_model=_GEMINI_MODEL, engine="api", translate=None, bilingual=None, auto_yes=False,
             link_timestamps=False, srt=False, epub=False, dedupe=True, obsidian=False,
+            ts_every=0, single_line=False, txt=False,
             cookies_from_browser=None, jsonl=False):
     to_stdout = (out == "-")
     _say = (lambda *a, **k: print(*a, **{**k, "file": sys.stderr, "flush": True})) \
@@ -281,6 +282,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                    transcribe=transcribe, summarize=summarize, gemini_model=gemini_model,
                     engine=engine, fetch_gap=fetch_gap, workers=workers, pdf=pdf,
                 link_timestamps=link_timestamps, srt=srt, epub=epub, dedupe=dedupe,
+                ts_every=ts_every, single_line=single_line, txt=txt,
                 obsidian=obsidian, cookies_from_browser=cookies_from_browser, jsonl=jsonl,
                 bilingual=bilingual)
     _say(f"{total} videos found", flush=True)
@@ -414,6 +416,14 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                     text = linkify(text, v["id"])
                 else:
                     plain = text
+                if ts_every:
+                    from .links import thin_markers
+                    text = thin_markers(text, ts_every)
+                    plain = thin_markers(plain, ts_every)
+                if single_line:
+                    from .links import to_single_line
+                    text = to_single_line(text)
+                    plain = to_single_line(plain)
                 if res.get("cached") and verbose:
                     log("  (from cache)")
                 if text is None:
@@ -511,6 +521,16 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                             sf.write(srt_text)
                     elif srt and verbose:
                         log("  (no .srt: transcribed videos carry no timings)")
+                    if txt and not to_stdout:
+                        from .export_txt import to_txt
+                        txt_text = to_txt(plain)
+                        if layout != "single":
+                            txt_path = os.path.splitext(vp)[0] + ".txt"
+                        else:
+                            base = os.path.splitext(os.path.basename(out))[0]
+                            txt_path = os.path.join(root, f"{base}_{v['id']}.txt")
+                        with open(txt_path, "w", encoding="utf-8") as tf:
+                            tf.write(f"{title}\n{v['id']}\n\n{txt_text}")
                 except OSError as e:
                     if to_stdout and isinstance(e, BrokenPipeError):
                         os._exit(0)  # `| head` is success, not failure

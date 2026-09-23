@@ -1,4 +1,9 @@
-[![version v0.15.0](https://img.shields.io/badge/version-v0.15.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.15.0)
+[![version v0.16.0](https://img.shields.io/badge/version-v0.16.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.16.0)
+
+## v0.15.0
+246449e 0.15.0: jsonl, stdout pipe, bilingual, retry-after, watch daemon, tauri scaffold
+c7cf4b3 README: English beginner-friendly rewrite
+2691226 README: beginner-friendly rewrite, changelog removed
 
 ## v0.14.1
 2aa0b69 0.14.1: wiring gaps (mcp/web/tui epub+)
