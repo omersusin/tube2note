@@ -12,7 +12,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -U flet yt-dlp certifi
+      - name: Restore upload keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > $RUNNER_TEMP/upload.jks
       - run: flet build apk --yes --org com.omersusin --project tube2note --module-name mobile_main --verbose --output build-apk
+        env:
+          FLET_ANDROID_SIGNING_KEY_STORE: ${{ runner.temp }}/upload.jks
+          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASS }}
       - uses: actions/upload-artifact@v4
         with:
           name: tube2note-apk
