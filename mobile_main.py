@@ -52,7 +52,7 @@ def main(page: ft.Page):
     page.scroll = ft.ScrollMode.AUTO
     print(_diag(), flush=True)
     url = ft.TextField(label="YouTube link (video / channel / playlist)", expand=True)
-    out_name = ft.TextField(label="Output name", value="mobile.md", width=220)
+    out_name = ft.TextField(label="Output name (empty = video title)", value="", width=220)
     lang = ft.TextField(label="Languages", value="tr,en", width=160)
     max_n = ft.TextField(label="Max videos", value="20", width=140)
     layout = ft.Dropdown(label="Layout", value="single", width=160,
@@ -74,8 +74,21 @@ def main(page: ft.Page):
     files_list = ft.Text("", selectable=True)
 
     def out_file():
-        name = (out_name.value or "mobile.md").strip() or "mobile.md"
+        name = (out_name.value or "").strip()
+        if not name:
+            return ""  # resolved from video title at run time
         return name if name.lower().endswith(".md") else name + ".md"
+
+    async def resolve_name(urls):
+        from tube2note.naming import slug
+        if out_file():
+            return out_file()
+        try:
+            vids, hint = await asyncio.to_thread(api.list_videos, urls, 5, None)
+            title = hint or (vids[0].get("title") if vids else "") or "tube2note"
+            return slug(title)
+        except Exception:  # noqa: BLE001 — fall back, never block the run
+            return "tube2note.md"
 
     def refresh_files():
         d = _outdir()
@@ -106,7 +119,7 @@ def main(page: ft.Page):
             langs = await asyncio.to_thread(api.language_hint, vids)
             sug = langs[0] if isinstance(langs, tuple) else langs
             log.value = (f"Preview: {len(vids)} videos, languages: {sug}\n"
-                         f"Output: {out_file()}")
+                         f"Output: {out_file() or 'auto (video title)'}")
         except Exception as e:  # noqa: BLE001
             log.value = f"Preview failed: {e}"
         page.update()
@@ -135,8 +148,9 @@ def main(page: ft.Page):
             page.update()
             return
         try:
+            fname = await resolve_name(urls)
             code, res = await asyncio.to_thread(
-                api.collect, urls, out_file(),
+                api.collect, urls, fname,
                 None, {"outdir": outdir},
                 **{"lang": lang.value or "tr,en", "max_n": n, "verbose": False,
                    "layout": layout.value or "single",
@@ -147,7 +161,7 @@ def main(page: ft.Page):
                    "pdf": pdf.value, "epub": epub.value},
             )
             log.value = (f"Done: {res.get('ok', 0)}/{res.get('total', 0)} videos.\n"
-                         f"Saved to {outdir}/{out_file()}\n"
+                         f"Saved to {outdir}/{fname}\n"
                          f"(exit {code})")
         except Exception as e:  # noqa: BLE001 — show it, don't crash the app
             log.value = f"Failed: {e}"
