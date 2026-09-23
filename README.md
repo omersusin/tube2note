@@ -1,24 +1,14 @@
 <img src="docs/banner.png" alt="tube2note banner">
 
-# tube2note — Turn YouTube videos into text
-
 [![PyPI](https://img.shields.io/pypi/v/tube2note)](https://pypi.org/project/tube2note/)
 [![Site](https://img.shields.io/badge/site-tube2note.github.io-blue)](https://omersusin.github.io/tube2note/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-Turn a YouTube channel, playlist, or videos into **readable text files**. Study, research, or feed them to AI tools like NotebookLM.
-
-🌐 **Site:** https://omersusin.github.io/tube2note/ · 🐙 **Source:** https://github.com/omersusin/tube2note
-
-> **No technical background needed.** Follow the steps in order — your first file will be ready in 10 minutes.
-
-**Fastest way (one line):**
+YouTube → readable text. Study, research, or feed it to NotebookLM. No tech skills needed — first file in 10 minutes.
 
 ```bash
 curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh
 ```
-
-It detects your system, asks app-or-CLI, installs, and verifies. Prefer manual steps? Keep reading.
 
 ---
 
