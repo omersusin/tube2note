@@ -52,6 +52,7 @@ def main(page: ft.Page):
     page.scroll = ft.ScrollMode.AUTO
     print(_diag(), flush=True)
     url = ft.TextField(label="YouTube link (video / channel / playlist)", expand=True)
+    out_name = ft.TextField(label="Output name", value="mobile.md", width=220)
     lang = ft.TextField(label="Languages", value="tr,en", width=160)
     max_n = ft.TextField(label="Max videos", value="20", width=140)
     layout = ft.Dropdown(label="Layout", value="single", width=160,
@@ -69,6 +70,46 @@ def main(page: ft.Page):
     log = ft.Text("", selectable=True)
     bar = ft.ProgressBar(visible=False, expand=True)
     go = ft.Button(content="Download")
+    preview = ft.Button(content="Preview")
+    files_list = ft.Text("", selectable=True)
+
+    def out_file():
+        name = (out_name.value or "mobile.md").strip() or "mobile.md"
+        return name if name.lower().endswith(".md") else name + ".md"
+
+    def refresh_files():
+        d = _outdir()
+        try:
+            items = sorted(os.listdir(d))
+        except OSError:
+            items = []
+        rows = []
+        for f in items:
+            if f.endswith(".md"):
+                try:
+                    kb = os.path.getsize(os.path.join(d, f)) // 1024
+                except OSError:
+                    kb = 0
+                rows.append(f"{f} ({kb} KB)")
+        files_list.value = "Files:\n" + ("\n".join(rows) if rows else "Nothing here yet.")
+
+    async def do_preview(_):
+        urls = [u for u in (url.value or "").replace(",", " ").split() if u]
+        if not urls:
+            log.value = "Paste a YouTube link first."
+            page.update()
+            return
+        log.value = "Listing..."
+        page.update()
+        try:
+            vids, _hint = await asyncio.to_thread(api.list_videos, urls, 100, None)
+            langs = await asyncio.to_thread(api.language_hint, vids)
+            sug = langs[0] if isinstance(langs, tuple) else langs
+            log.value = (f"Preview: {len(vids)} videos, languages: {sug}\n"
+                         f"Output: {out_file()}")
+        except Exception as e:  # noqa: BLE001
+            log.value = f"Preview failed: {e}"
+        page.update()
 
     async def run(_):
         go.disabled = True
@@ -95,7 +136,7 @@ def main(page: ft.Page):
             return
         try:
             code, res = await asyncio.to_thread(
-                api.collect, urls, "mobile.md",
+                api.collect, urls, out_file(),
                 None, {"outdir": outdir},
                 **{"lang": lang.value or "tr,en", "max_n": n, "verbose": False,
                    "layout": layout.value or "single",
@@ -106,26 +147,31 @@ def main(page: ft.Page):
                    "pdf": pdf.value, "epub": epub.value},
             )
             log.value = (f"Done: {res.get('ok', 0)}/{res.get('total', 0)} videos.\n"
-                         f"Saved to {outdir}/mobile.md\n"
+                         f"Saved to {outdir}/{out_file()}\n"
                          f"(exit {code})")
         except Exception as e:  # noqa: BLE001 — show it, don't crash the app
             log.value = f"Failed: {e}"
+        refresh_files()
         go.disabled = False
         bar.visible = False
         page.update()
 
     go.on_click = run
+    preview.on_click = do_preview
     page.add(
         ft.Text("tube2note", size=28, weight="bold"),
         ft.Text("YouTube to Markdown for NotebookLM", size=14),
         ft.Row([url]),
-        ft.Row([lang, max_n, go]),
+        ft.Row([out_name, lang, max_n, go]),
         ft.Row([layout, since]),
         ft.Row([split_n, workers_n]),
         timestamps, link_ts, srt, clean, pdf, epub,
+        ft.Row([preview]),
+        files_list,
         bar,
         log,
     )
+    refresh_files()
 
 
 ft.run(main)
