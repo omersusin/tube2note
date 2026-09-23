@@ -1,0 +1,19 @@
+name: flet-apk
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -U flet yt-dlp
+      - run: flet build apk --verbose --output build-apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tube2note-apk
+          path: build-apk/*.apk
