@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 keywords = ["youtube", "transcript", "markdown", "notebooklm", "cli", "rag", "yt-dlp", "web-ui"]
-dependencies = ["yt-dlp"]
+dependencies = ["yt-dlp[default]", "certifi"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
