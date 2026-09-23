@@ -54,6 +54,18 @@ def main(page: ft.Page):
     url = ft.TextField(label="YouTube link (video / channel / playlist)", expand=True)
     lang = ft.TextField(label="Languages", value="tr,en", width=160)
     max_n = ft.TextField(label="Max videos", value="20", width=140)
+    layout = ft.Dropdown(label="Layout", value="single", width=160,
+                         options=[ft.dropdown.Option("single"), ft.dropdown.Option("videos"),
+                                  ft.dropdown.Option("tree")])
+    since = ft.TextField(label="Since (YYYY-MM-DD)", width=180)
+    split_n = ft.TextField(label="Split words (0=off)", value="0", width=160)
+    workers_n = ft.TextField(label="Workers (1=safest)", value="1", width=160)
+    timestamps = ft.Checkbox(label="Keep [MM:SS] timestamps", value=False)
+    link_ts = ft.Checkbox(label="Clickable timestamp links", value=False)
+    srt = ft.Checkbox(label="Write .srt sidecars", value=False)
+    clean = ft.Checkbox(label="Clean transcripts", value=True)
+    pdf = ft.Checkbox(label="Also write PDF", value=False)
+    epub = ft.Checkbox(label="Also write EPUB", value=False)
     log = ft.Text("", selectable=True)
     bar = ft.ProgressBar(visible=False, expand=True)
     go = ft.Button(content="Download")
@@ -73,8 +85,10 @@ def main(page: ft.Page):
         outdir = _outdir()
         try:
             n = max(1, int(max_n.value or 20))
+            split = max(0, int(split_n.value or 0))
+            wk = min(4, max(1, int(workers_n.value or 1)))
         except ValueError:
-            log.value = "Max videos must be a number."
+            log.value = "Max videos / split / workers must be numbers."
             go.disabled = False
             bar.visible = False
             page.update()
@@ -83,7 +97,13 @@ def main(page: ft.Page):
             code, res = await asyncio.to_thread(
                 api.collect, urls, "mobile.md",
                 None, {"outdir": outdir},
-                **{"lang": lang.value or "tr,en", "max_n": n, "verbose": False},
+                **{"lang": lang.value or "tr,en", "max_n": n, "verbose": False,
+                   "layout": layout.value or "single",
+                   "since": since.value.strip() or None,
+                   "split_words": split, "workers": wk,
+                   "ts": timestamps.value, "link_timestamps": link_ts.value,
+                   "srt": srt.value, "clean": clean.value,
+                   "pdf": pdf.value, "epub": epub.value},
             )
             log.value = (f"Done: {res.get('ok', 0)}/{res.get('total', 0)} videos.\n"
                          f"Saved to {outdir}/mobile.md\n"
@@ -100,6 +120,9 @@ def main(page: ft.Page):
         ft.Text("YouTube to Markdown for NotebookLM", size=14),
         ft.Row([url]),
         ft.Row([lang, max_n, go]),
+        ft.Row([layout, since]),
+        ft.Row([split_n, workers_n]),
+        timestamps, link_ts, srt, clean, pdf, epub,
         bar,
         log,
     )
