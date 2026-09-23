@@ -52,4 +52,4 @@ select = ["F", "I"]
 # our app does no reflective lookups). Split per ABI for smaller downloads.
 [tool.flet.android]
 split_per_abi = true
-dependencies = ["flet"]
+dependencies = ["flet==1.0.*"]

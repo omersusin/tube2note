@@ -11,7 +11,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -U flet yt-dlp certifi
+      - run: pip install -U "flet==1.0.*" yt-dlp certifi
       - name: Restore upload keystore
         run: echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > $RUNNER_TEMP/upload.jks
       - run: flet build apk --yes --org com.omersusin --project tube2note --module-name mobile_main --verbose --output build-apk
