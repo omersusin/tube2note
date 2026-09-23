@@ -16,9 +16,21 @@ curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh
 
 ## Walkthrough
 
-| Install | Preview | Download | Search |
-|---|---|---|---|
-| ![install](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-0-setup.png) | ![preview](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-3-dryrun.png) | ![download](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-4-done.png) | ![search](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-5-search.png) |
+**1. Install.** One command installs everything.
+
+![install](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-0-setup.png)
+
+**2. Preview.** Dry run shows what you will get, downloads nothing.
+
+![preview](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-3-dryrun.png)
+
+**3. Download.** One video in, transcript plus citation and subtitle files out.
+
+![download](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-4-done.png)
+
+**4. Search.** Find any sentence across all saved notes, offline.
+
+![search](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-5-search.png)
 offline search · sponsor skip · citations (APA/MLA/Chicago/BibTeX) ·
 SRT/VTT/TXT/PDF/EPUB/Anki/Obsidian exports · AI summarize/translate/transcribe ·
 web UI, mobile app, Python API & MCP server.
