@@ -32,7 +32,7 @@ install_cli() {
     if command -v pipx >/dev/null 2>&1; then
         pipx install 'tube2note' || pipx reinstall 'tube2note' || die "install failed (see error above)"
     elif python3 -m pip --version >/dev/null 2>&1; then
-        python3 -m pip install --user -U 'tube2note' || die "install failed (see error above — on Termux, try: pkg install clang)"
+        python3 -m pip install --user --no-cache-dir -U 'tube2note' || die "install failed (see error above — on Termux, try: pkg install clang)"
     else
         die "no pip found (try: pkg install python / apt install python3-pip)"
     fi
