@@ -1,6 +1,7 @@
 from tube2note.export_txt import to_txt
 from tube2note.links import linkify, thin_markers, to_single_line
 
+
 def test_thin_every():
     t = "[00:05] a [00:10] b [00:40] c"
     assert thin_markers(t, 0) == t
