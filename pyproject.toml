@@ -50,6 +50,9 @@ select = ["F", "I"]
 
 # Flet Android: R8/ProGuard runs by default on release builds (keep defaults —
 # our app does no reflective lookups). Split per ABI for smaller downloads.
+[tool.flet]
+icon_background = "#161a22"
+
 [tool.flet.android]
 split_per_abi = true
 dependencies = ["flet==1.0.*"]
