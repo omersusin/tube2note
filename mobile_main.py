@@ -58,17 +58,32 @@ def main(page: ft.Page):
     page.scroll = ft.ScrollMode.AUTO
     page.theme_mode = ft.ThemeMode.DARK
     page.theme = ft.Theme(color_scheme_seed="#d92d20")
+    page.bgcolor = "#0d1017"
+    page.padding = 16
+    _CARD = "#161a22"
+    _MUTED = "#8b95a5"
+
+    def _section(t):
+        return ft.Text(t, size=12, weight=ft.FontWeight.BOLD, color=_MUTED)
+
+    def _card(*items):
+        return ft.Container(
+            content=ft.Column(list(items), spacing=10),
+            bgcolor=_CARD,
+            border_radius=12,
+            padding=12,
+        )
     print(_diag(), flush=True)
     url = ft.TextField(label="YouTube link (video / channel / playlist)", expand=True)
-    out_name = ft.TextField(label="Output name (empty = video title)", value="", width=220)
-    lang = ft.TextField(label="Languages", value="tr,en", width=160)
-    max_n = ft.TextField(label="Max videos", value="20", width=140)
-    layout = ft.Dropdown(label="Layout", value="single", width=160,
+    out_name = ft.TextField(label="Output name (empty = video title)", value="", width=220, expand=True)
+    lang = ft.TextField(label="Languages", value="tr,en", width=160, expand=True)
+    max_n = ft.TextField(label="Max videos", value="20", width=140, expand=True)
+    layout = ft.Dropdown(label="Layout", value="single", width=160, expand=True,
                          options=[ft.dropdown.Option("single"), ft.dropdown.Option("videos"),
                                   ft.dropdown.Option("tree")])
-    since = ft.TextField(label="Since (YYYY-MM-DD)", width=180)
-    split_n = ft.TextField(label="Split words (0=off)", value="0", width=160)
-    workers_n = ft.TextField(label="Workers (1=safest)", value="1", width=160)
+    since = ft.TextField(label="Since (YYYY-MM-DD)", width=180, expand=True)
+    split_n = ft.TextField(label="Split words (0=off)", value="0", width=160, expand=True)
+    workers_n = ft.TextField(label="Workers (1=safest)", value="1", width=160, expand=True)
     timestamps = ft.Checkbox(label="Keep [MM:SS] timestamps", value=False)
     link_ts = ft.Checkbox(label="Clickable timestamp links", value=False)
     srt = ft.Checkbox(label="Write .srt sidecars", value=False)
@@ -77,13 +92,13 @@ def main(page: ft.Page):
     epub = ft.Checkbox(label="Also write EPUB", value=False)
     tr_summarize = ft.Checkbox(label="Summarize each video (needs key)", value=False)
     tr_transcribe = ft.Checkbox(label="Transcribe videos without captions (needs key)", value=False)
-    tr_translate = ft.TextField(label="Translate to (e.g. tr, empty=off)", width=220)
+    tr_translate = ft.TextField(label="Translate to (e.g. tr, empty=off)", width=220, expand=True)
     gemini_key = ft.TextField(label="GEMINI_API_KEY (free at aistudio.google.com)", password=True,
                               can_reveal_password=True, expand=True)
-    log = ft.Text("", selectable=True)
+    log = ft.Text("", selectable=True, font_family="monospace")
     bar = ft.ProgressBar(visible=False, expand=True)
-    go = ft.Button(content="Download")
-    preview = ft.Button(content="Preview")
+    go = ft.Button(content="Download", expand=True, height=52)
+    preview = ft.Button(content="Preview", expand=True, height=48)
     files_list = ft.Text("", selectable=True)
 
     def out_file():
@@ -230,20 +245,48 @@ def main(page: ft.Page):
     go.on_click = run
     preview.on_click = do_preview
     page.add(
-        ft.Text("tube2note", size=28, weight=ft.FontWeight.BOLD),
-        ft.Text("YouTube to Markdown for NotebookLM", size=14),
-        ft.Row([url]),
-        ft.Row([out_name, lang, max_n, go]),
-        ft.Row([layout, since]),
-        ft.Row([split_n, workers_n]),
-        timestamps, link_ts, srt, clean, pdf, epub,
-        tr_transcribe, tr_summarize,
-        ft.Row([tr_translate]),
-        ft.Row([gemini_key]),
-        ft.Row([preview]),
-        files_list,
-        bar,
-        log,
+        ft.Column(
+            [
+                _card(
+                    ft.Text("tube2note", size=28, weight=ft.FontWeight.BOLD, color="#e8ecf1"),
+                    ft.Text("YouTube to Markdown for NotebookLM", size=14, color="#8b95a5"),
+                ),
+                _section("SOURCE"),
+                _card(
+                    url,
+                    ft.Text("Paste a video, channel, or playlist link.", size=12, color="#8b95a5"),
+                ),
+                _section("OUTPUT"),
+                _card(
+                    out_name,
+                    lang,
+                    max_n,
+                    layout,
+                    since,
+                    split_n,
+                    workers_n,
+                    timestamps, link_ts, srt, clean, pdf, epub,
+                    ft.Text("Options apply to every download.", size=12, color="#8b95a5"),
+                ),
+                _section("AI (needs key)"),
+                _card(
+                    tr_transcribe, tr_summarize,
+                    tr_translate,
+                    gemini_key,
+                ),
+                _section("ACTIONS"),
+                _card(
+                    go,
+                    preview,
+                    bar,
+                ),
+                _section("FILES"),
+                _card(files_list),
+                _section("LOG"),
+                _card(log),
+            ],
+            spacing=12,
+        ),
     )
     refresh_files()
 

@@ -6,29 +6,79 @@
 <title>tube2note — YouTube to Markdown for NotebookLM</title>
 <meta name="description" content="Turn channels, playlists, videos into Markdown + PDF for NotebookLM. Resumable, polite, phone-friendly.">
 <link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0d1017">
+<link rel="icon" href="favicon-64.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
-body{font-family:system-ui,sans-serif;max-width:760px;margin:2em auto;padding:0 1em;line-height:1.6}
-pre{background:#f4f4f4;padding:1em;border-radius:8px;overflow-x:auto}
-.cta a{display:inline-block;margin:0 .6em .6em 0;padding:.6em 1.2em;background:#0969da;color:#fff;border-radius:8px;text-decoration:none}
-.card{border:1px solid #e3e6ec;border-radius:12px;padding:1em;margin:1em 0}
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{background:#0d1017;color:#e8ecf1;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;max-width:880px;margin:0 auto;padding:2.5rem 1.25rem 3rem;line-height:1.6}
+h1{font-size:2.4rem;margin:0 0 .4rem;letter-spacing:-.02em}
+h2{font-size:1.25rem;margin:2.5rem 0 .8rem;letter-spacing:-.01em}
+p{color:#8b95a5;margin:.5rem 0}
+p strong,li strong{color:#e8ecf1}
+.hero p.tag{font-size:1.15rem;color:#e8ecf1;max-width:36rem}
+.cta{display:flex;flex-wrap:wrap;gap:.6rem;margin:1.2rem 0}
+.cta a{padding:.6em 1.2em;border-radius:8px;text-decoration:none;font-weight:600;border:1px solid #2a3140;color:#e8ecf1;background:#161a22}
+.cta a.primary{background:#d92d20;border-color:#d92d20;color:#fff}
+pre{background:#161a22;border:1px solid #2a3140;border-radius:10px;padding:1em;overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9rem;color:#e8ecf1}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em;background:#161a22;border:1px solid #2a3140;border-radius:6px;padding:.1em .35em}
+pre code{background:none;border:none;padding:0}
+small.note{color:#8b95a5}
+a{color:#e8ecf1}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem;margin:1rem 0}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem}
+.card{background:#161a22;border:1px solid #2a3140;border-radius:12px;padding:1em}
+.card h3{margin:0 0 .3rem;font-size:1rem}
+.card p{margin:0;font-size:.92rem}
+.panel{background:#161a22;border:1px solid #2a3140;border-radius:12px;padding:1.1em 1.2em}
+details{background:#161a22;border:1px solid #2a3140;border-radius:10px;padding:.8em 1em;margin:.6rem 0}
+details summary{cursor:pointer;font-weight:600;color:#e8ecf1}
+details p{margin:.5rem 0 0;font-size:.95rem}
+footer{margin-top:3rem;padding-top:1.2rem;border-top:1px solid #2a3140;color:#8b95a5;font-size:.9rem}
+footer nav{display:flex;flex-wrap:wrap;gap:1rem;margin-top:.4rem}
+@media(max-width:640px){.steps,.grid{grid-template-columns:1fr}h1{font-size:1.9rem}}
 </style>
 </head>
 <body>
-<h1>tube2note — YouTube to Markdown for NotebookLM</h1>
-<p>Turn a channel, playlist, or videos into <strong>Markdown + PDF</strong> ready for NotebookLM / any RAG pipeline. Resumable, polite to rate limits, works in terminal, guided mode, or local web UI.</p>
-<div class="cta"><a href="https://github.com/omersusin/tube2note">GitHub</a><a href="https://pypi.org/project/tube2note/">PyPI</a><a href="https://catalyze-displease-kissable.ngrok-free.dev/">Live demo</a></div>
-<p><small>Live demo runs on the developer's phone — available while it stays online.</small></p>
-<h2>Install</h2>
-<pre>pip install tube2note
-tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"
-# guided: tube2note
-# web UI: tube2note serve
-# search: tube2note search "query" -d ./out</pre>
-<div class="card"><strong>Students:</strong> one file per course, <code>--split-words 400000</code> under the 500k NotebookLM cap, <code>--timestamps</code> for citations.</div>
-<div class="card"><strong>Researchers:</strong> <code>--layout tree</code> + INDEX.md, <code>--since YYYY-MM-DD</code>, resume with <code>--resume-last</code>, search offline.</div>
-<h2>Why not paste links into NotebookLM?</h2>
-<ul><li>Caps (~100 videos), needs captions per video.</li><li>tube2note merges everything you control: timestamps, chapters, per-video files, resume.</li></ul>
-<h2>Deploy this site free</h2>
-<p>Settings → Pages → Deploy from Actions. File lives in <code>docs/</code>, workflow <code>.github/workflows/pages.yml</code>.</p>
+<header class="hero">
+<h1><img src="icon-192.png" width="48" style="vertical-align:middle" alt="tube2note logo"> tube2note</h1>
+<p class="tag">YouTube channels, playlists, and videos &rarr; clean Markdown ready for NotebookLM.</p>
+<div class="cta"><a class="primary" href="https://github.com/omersusin/tube2note">GitHub</a><a href="https://pypi.org/project/tube2note/">PyPI</a><a href="https://catalyze-displease-kissable.ngrok-free.dev/">Live demo</a></div>
+<pre><code>pip install tube2note
+tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"</code></pre>
+<p><small class="note">Live demo runs on the developer's phone &mdash; available while it stays online. Prefer the browser? <a href="app.html">Try the web UI</a> or run <code>tube2note serve</code> locally.</small></p>
+</header>
+<main>
+<h2>How it works</h2>
+<div class="steps">
+<div class="card"><h3>1. Point</h3><p>Paste a channel, playlist, or video URL. Guided mode included: just run <code>tube2note</code>.</p></div>
+<div class="card"><h3>2. Fetch</h3><p>Captions, timestamps, and chapters &mdash; throttled and resumable.</p></div>
+<div class="card"><h3>3. Drop in</h3><p>Markdown (+ PDF) that NotebookLM accepts as a source.</p></div>
+</div>
+<h2>Built for the NotebookLM cap</h2>
+<div class="panel">
+<p><strong>One notebook holds ~500,000 words.</strong> Stay under it with <code>--split-words 400000</code>, one file per course, and <code>--timestamps</code> for citations.</p>
+</div>
+<h2>Features</h2>
+<div class="grid">
+<div class="card"><h3>Resume</h3><p><code>--resume-last</code> picks up long runs where they stopped.</p></div>
+<div class="card"><h3>Watch</h3><p>Track channels, fetch only new uploads since last run.</p></div>
+<div class="card"><h3>Search</h3><p><code>tube2note search "query"</code> across saved transcripts, offline.</p></div>
+<div class="card"><h3>SRT + EPUB</h3><p>Per-video <code>.srt</code> sidecars and EPUB export for e-readers.</p></div>
+<div class="card"><h3>MCP</h3><p>Expose transcripts to MCP-aware assistants and agents.</p></div>
+<div class="card"><h3>API</h3><p>Local web UI and HTTP backend via <code>tube2note serve</code>.</p></div>
+</div>
+<h2>FAQ</h2>
+<details><summary>Why not paste links into NotebookLM?</summary><p>NotebookLM caps linked videos (~100) and needs captions per video. tube2note merges everything you control: timestamps, chapters, per-video files, resume.</p></details>
+<details><summary>What if a video has no captions?</summary><p>Transcribe mode covers caption-less videos, so the transcript still lands in your Markdown.</p></details>
+<details><summary>Will it get rate-limited?</summary><p>Runs are throttled, back off politely, and resume cleanly with <code>--resume-last</code>.</p></details>
+<details><summary>Where does the live demo run?</summary><p>On the developer's phone &mdash; handy for a peek. For real work, <code>pip install tube2note</code> and run it locally.</p></details>
+</main>
+<footer>
+<p>tube2note &mdash; YouTube &rarr; Markdown for NotebookLM.</p>
+<nav><a href="https://github.com/omersusin/tube2note">GitHub</a><a href="https://pypi.org/project/tube2note/">PyPI</a><a href="https://catalyze-displease-kissable.ngrok-free.dev/">Live demo</a><a href="app.html">Web UI</a></nav>
+</footer>
+<script>if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); }</script>
 </body>
 </html>

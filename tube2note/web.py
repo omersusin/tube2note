@@ -550,59 +550,89 @@ INDEX_HTML = r"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>tube2note</title>
 <style nonce="__NONCE__">
-:root{--bg:#f6f7f9;--card:#fff;--fg:#14181f;--mut:#667085;--line:#e3e6ec;--acc:#d92d20;--acc2:#b42318;--ok:#067647;--warn:#b54708;--bad:#b42318;--code:#0f1420;--codefg:#d6deeb}
-@media(prefers-color-scheme:dark){:root{--bg:#0d1017;--card:#161b26;--fg:#e8ecf3;--mut:#98a2b3;--line:#262d3c;--acc:#f04438;--acc2:#d92d20;--ok:#47cd89;--warn:#fdb022;--bad:#f97066}}
+:root{--bg:#0d1017;--card:#161a22;--fg:#e8ecf1;--mut:#8b95a5;--line:#2a3344;--field:#0d1017;--acc:#d92d20;--acc-hover:#b42318;--link:#f97066;--ok:#47cd89;--warn:#fdb022;--bad:#f97066;--code:#0d1017;--codefg:#d6deeb}
 [hidden]{display:none!important}*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:12px 12px calc(96px + env(safe-area-inset-bottom))}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:16px 14px calc(104px + env(safe-area-inset-bottom))}
 main{max-width:720px;margin:0 auto}
-h1{font-size:20px;margin:6px 2px 2px}h1 small{font-weight:400;color:var(--mut);font-size:13px}
-.sub{color:var(--mut);font-size:13px;margin:0 2px 12px;word-break:break-all}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:0 0 12px}
-.card h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:0 0 10px}
-label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
-textarea,input[type=text],input[type=number],input[type=date],select{width:100%;font:inherit;color:inherit;background:transparent;border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px}
-textarea{min-height:110px;resize:vertical}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.chk{display:flex;align-items:center;gap:10px;min-height:44px;font-size:16px;color:var(--fg);margin:0}
-.chk input{width:22px;height:22px;accent-color:var(--acc)}
-details{margin-top:8px}summary{cursor:pointer;color:var(--mut);min-height:44px;display:flex;align-items:center}
-.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom));display:flex;gap:10px;justify-content:center}
+.top{padding:8px 2px 14px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;letter-spacing:.01em}
+.brand .dot{width:10px;height:10px;border-radius:3px;background:var(--acc);flex:none}
+.brand small{font-weight:500;color:var(--mut);font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+h1{font-size:23px;line-height:1.25;margin:12px 0 4px;letter-spacing:-.01em}
+.tagline{color:var(--mut);font-size:14px;margin:0 0 12px}
+.outdir{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.outdir-label{display:block;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--mut)}
+.sub{color:var(--mut);font-size:13px;margin:0}
+.sub.mono{color:var(--fg);margin-top:4px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;word-break:break-all}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin:0 0 14px}
+.card h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 6px;padding:0 0 10px;border-bottom:1px solid var(--line)}
+.group-label{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--mut);margin:18px 0 2px}
+label{display:block;font-size:13px;color:var(--mut);margin:12px 0 6px}
+textarea,input[type=text],input[type=number],input[type=date],select{width:100%;font:inherit;color:var(--fg);background:var(--field);border:1px solid var(--line);border-radius:10px;padding:12px;min-height:48px}
+textarea{min-height:120px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.5}
+input::placeholder,textarea::placeholder{color:var(--mut)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:560px){.row{grid-template-columns:1fr}body{padding-left:12px;padding-right:12px}.card{padding:16px 14px}}
+.checks{display:grid;gap:2px;margin-top:8px}
+.chk{display:flex;align-items:center;gap:12px;min-height:52px;font-size:15px;color:var(--fg);margin:0;padding:8px;border-radius:10px;cursor:pointer;font-weight:500}
+.chk:hover{background:#1c2330}
+.chk input{width:22px;height:22px;flex:none;accent-color:var(--acc)}
+details{margin-top:12px;border-top:1px solid var(--line);padding-top:4px}summary{cursor:pointer;color:var(--mut);min-height:48px;display:flex;align-items:center;font-size:14px}
+a{color:var(--link)}
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--link);outline-offset:2px}
+input:focus,textarea:focus,select:focus{border-color:var(--link)}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:12px 12px calc(12px + env(safe-area-inset-bottom));display:flex;gap:10px;justify-content:center}
 .bar .in{display:flex;gap:10px;width:100%;max-width:720px}
-button{font:inherit;font-weight:600;border:0;border-radius:12px;min-height:48px;padding:0 18px;cursor:pointer}
-.go{flex:1;background:var(--acc);color:#fff}.go:active{background:var(--acc2)}
-.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
-.stop{flex:1;background:var(--bad);color:#fff}
+button{font:inherit;font-weight:650;border:0;border-radius:12px;min-height:52px;padding:0 20px;cursor:pointer}
+.go{flex:2;background:var(--acc);color:#fff}.go:hover{background:var(--acc-hover)}.go:active{background:var(--acc-hover)}
+.sec{flex:1;background:transparent;color:var(--fg);border:1px solid var(--line)}
+.stop{flex:2;background:transparent;color:var(--bad);border:1px solid var(--acc-hover)}
 button:disabled{opacity:.45}
-.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid var(--line)}
+.pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:650;border:1px solid var(--line);text-transform:capitalize}
 .pill.running,.pill.stopping{color:var(--warn)}.pill.done{color:var(--ok)}.pill.failed,.pill.stopped{color:var(--bad)}
-.meter{height:10px;background:var(--line);border-radius:99px;overflow:hidden;margin:10px 0 6px}.meter i{display:block;height:100%;background:var(--acc);width:0;transition:width .4s}
+.meter{height:8px;background:var(--field);border:1px solid var(--line);border-radius:99px;overflow:hidden;margin:12px 0 8px}.meter i{display:block;height:100%;background:var(--acc);width:0;transition:width .4s}
 .stat{color:var(--mut);font-size:13px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
-pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:10px;margin:10px 0 0;max-height:260px;overflow:auto;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
-.err{color:var(--bad);font-size:14px;margin:8px 2px 0;min-height:1em}
-.file{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
-.file:first-of-type{border-top:0}.file b{font-weight:600;word-break:break-all}.file small{display:block;color:var(--mut)}
-.file a{color:var(--acc);text-decoration:none;font-weight:600;padding:10px 6px;white-space:nowrap}
-.hint{color:var(--mut);font-size:13px;margin:8px 2px}
+pre{background:var(--code);color:var(--codefg);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0 0;max-height:280px;overflow:auto;font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+.err{color:var(--bad);font-size:14px;margin:10px 2px 0;min-height:1.2em}
+.file{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.file:first-of-type{border-top:0}.file b{font-weight:500;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;word-break:break-all}.file small{display:block;color:var(--mut);font-size:12px;margin-top:2px}
+.file a{color:var(--link);text-decoration:none;font-weight:650;padding:12px 8px;white-space:nowrap;font-size:14px}
+.file a:hover{text-decoration:underline}
+.hint{color:var(--mut);font-size:13px;margin:10px 2px 0}
+.foot{color:var(--mut);font-size:12px;text-align:center;margin:6px 0 0}
 </style></head><body><main>
-<h1>tube2note <small id="ver"></small></h1>
-<p class="sub" id="dir"></p>
+<header class="top">
+<div class="brand"><span class="dot"></span><span>tube2note</span> <small id="ver"></small></div>
+<h1>YouTube to Markdown transcripts</h1>
+<p class="tagline">Paste links, pick options, start. Re-running the same name resumes where it stopped.</p>
+<div class="outdir"><span class="outdir-label">Output folder</span><p class="sub mono" id="dir"></p></div>
+</header>
 
 <section class="card"><h2>New job</h2>
+<p class="group-label">Source</p>
 <label for="urls">YouTube URLs (one per line: channel, playlist or videos)</label>
 <textarea id="urls" placeholder="https://www.youtube.com/@SomeChannel/videos" autocapitalize="off" spellcheck="false"></textarea>
+<p class="hint">Channel and playlist URLs can hold hundreds of videos — use Max videos to cap the run.</p>
 <div class="row">
 <div><label for="name">Output name (empty = video title)</label><input type="text" id="name" value="" placeholder="auto (video title)" autocapitalize="off"></div>
 <div><label for="lang">Languages</label><input type="text" id="lang" placeholder="en or tr,en" autocapitalize="off"></div>
 </div>
+<p class="group-label">Transcript</p>
+<div class="checks">
 <label class="chk"><input type="checkbox" id="timestamps"> Keep [MM:SS] timestamps</label>
 <label class="chk"><input type="checkbox" id="link_timestamps"> Clickable timestamp links</label>
 <label class="chk"><input type="checkbox" id="srt"> Write .srt sidecars</label>
 <label class="chk"><input type="checkbox" id="clean" checked> Clean transcripts</label>
+</div>
+<p class="group-label">Files</p>
+<div class="checks">
 <label class="chk" id="pdfrow"><input type="checkbox" id="pdf"> Also write PDF</label>
 <label class="chk"><input type="checkbox" id="epub"> Also write EPUB</label>
+</div>
 <details><summary>More options</summary>
 <div class="row">
 <div><label for="layout">Layout</label><select id="layout"><option>single</option><option>videos</option><option>tree</option></select></div>
@@ -612,8 +642,10 @@ pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:10px;m
 <div><label for="workers">Parallel workers (1 = safest)</label><input type="number" id="workers" value="1" min="1" max="4" inputmode="numeric"></div>
 </div></details>
 <div id="gem" hidden><details open><summary>Gemini (uses GEMINI_API_KEY from the server)</summary>
+<div class="checks">
 <label class="chk"><input type="checkbox" id="summarize"> Summarize each video</label>
 <label class="chk"><input type="checkbox" id="transcribe"> Transcribe videos without captions</label>
+</div>
 <label for="translate">Translate to (language code, optional)</label><input type="text" id="translate" placeholder="tr" autocapitalize="off">
 <label for="bilingual">Bilingual source+translation (language code, optional)</label><input type="text" id="bilingual" placeholder="tr" autocapitalize="off">
 </details></div>
@@ -627,6 +659,7 @@ pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:10px;m
 <pre id="log"></pre></section>
 
 <section class="card"><h2>Files</h2><div id="files"><p class="hint">Nothing here yet.</p></div></section>
+<p class="foot">Runs locally as a CLI subprocess — resume, layouts and throttling match the terminal.</p>
 </main>
 <div class="bar"><div class="in">
 <button class="sec" id="preview">Preview</button>

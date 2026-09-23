@@ -1,3 +1,5 @@
+<img src="docs/icon-192.png" width="64" alt="tube2note logo">
+
 # tube2note — Turn YouTube videos into text
 
 [![PyPI](https://img.shields.io/pypi/v/tube2note)](https://pypi.org/project/tube2note/)

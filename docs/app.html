@@ -4,42 +4,119 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="tube2note web: run YouTube to Markdown from your browser via free backend.">
+<meta name="theme-color" content="#0d1017">
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23d92d20'/%3E%3Crect x='9' y='8' width='14' height='16' rx='2' fill='%23e8ecf1'/%3E%3C/svg%3E">
 <title>tube2note web</title>
-<style>body{font-family:system-ui;max-width:720px;margin:2em auto;padding:0 1em;line-height:1.6}
-textarea,input,select{width:100%;padding:.6em;margin:.3em 0}pre{background:#f4f4f4;padding:1em;overflow:auto}</style>
+<style>
+*{box-sizing:border-box}
+:root{color-scheme:dark}
+body{margin:0;background:#0d1017;color:#e8ecf1;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.55;padding:28px 16px 56px}
+.wrap{max-width:720px;margin:0 auto}
+header.top{display:flex;align-items:center;gap:12px;margin:4px 0 16px}
+.mark{width:32px;height:32px;border-radius:8px;background:#d92d20;flex:none}
+header.top h1{font-size:1.25rem;margin:0;letter-spacing:.01em}
+header.top p{margin:2px 0 0;color:#8b95a5;font-size:.9rem}
+.card{background:#161a22;border:1px solid #262c36;border-radius:12px;padding:20px}
+.card>p.sub{margin:0 0 16px;color:#8b95a5;font-size:.9rem}
+.card>p.sub code{color:#e8ecf1;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85em}
+section.grp{border-top:1px solid #262c36;padding:14px 0 6px;margin:0}
+section.grp:first-of-type{border-top:0;padding-top:0}
+section.grp h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.12em;color:#8b95a5;margin:0 0 12px;font-weight:600}
+label.field{display:block;margin:0 0 12px}
+label.field>span{display:block;font-size:.8rem;color:#8b95a5;margin-bottom:6px}
+textarea,input,select{width:100%;background:#0d1017;border:1px solid #2a3140;color:#e8ecf1;border-radius:8px;padding:.65em .75em;font-size:.95rem;margin:0}
+textarea{min-height:84px;resize:vertical;font-family:inherit}
+input:focus,textarea:focus,select:focus{outline:none;border-color:#d92d20}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 12px}
+label.check{display:flex;align-items:center;gap:8px;background:#0d1017;border:1px solid #2a3140;border-radius:8px;padding:.55em .7em;font-size:.9rem;cursor:pointer;margin:0}
+label.check input{width:auto;accent-color:#d92d20;margin:0}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 4px}
+button{font-size:.95rem;font-weight:600;border-radius:8px;padding:.65em 1.2em;cursor:pointer;border:1px solid #2a3140}
+#go{background:#d92d20;border-color:#d92d20;color:#fff}
+#go:hover{background:#b3251a}
+#preview,#local{background:transparent;color:#e8ecf1}
+#preview:hover,#local:hover{border-color:#8b95a5}
+.status{margin-top:16px}
+#err{color:#ff7a70;min-height:1.4em;margin:.4em 0;font-size:.9rem}
+.prow{display:flex;align-items:center;gap:10px;margin:.4em 0}
+progress#bar{flex:1;height:10px;accent-color:#d92d20}
+#nums{color:#8b95a5;font-size:.85rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+pre#log{background:#0d1017;border:1px solid #262c36;border-radius:8px;padding:1em;overflow:auto;min-height:120px;max-height:380px;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem;color:#e8ecf1;margin:.6em 0}
+a#dl{display:inline-block;margin-top:.4em;background:#d92d20;color:#fff;text-decoration:none;font-weight:600;border-radius:8px;padding:.6em 1.2em}
+a#dl[hidden]{display:none}
+@media(max-width:560px){.card{padding:16px}.grid2,.checks{grid-template-columns:1fr}.actions{flex-direction:column}.actions button{width:100%}}
+</style>
 </head>
 <body>
-<h1>tube2note web</h1>
-<p>Static page (GitHub Pages) + free backend. No keys in this page — see BACKEND.md.
-Local alternative: <code>tube2note serve</code> on your machine.</p>
+<div class="wrap">
+<header class="top">
+<div class="mark" aria-hidden="true"></div>
+<div>
+<h1><img src="icon-192.png" width="40" style="vertical-align:middle" alt="tube2note logo"> tube2note web</h1>
+<p>Static page (GitHub Pages) + free backend. No keys here.</p>
+</div>
+</header>
+<main class="card">
+<p class="sub">Local alternative: <code>tube2note serve</code> on your machine. See BACKEND.md for backend setup.</p>
 <form id="f">
+<section class="grp" aria-label="Source">
+<h2>Source</h2>
+<label class="field" for="urls"><span>Channel or video URLs (one per line)</span></label>
 <textarea id="urls" placeholder="https://www.youtube.com/@SomeChannel/videos"></textarea>
-<input id="name" value="tube2note.md">
-<input id="lang" placeholder="en or tr,en">
-<div><select id="layout"><option>single</option><option>videos</option><option>tree</option></select>
-<input id="max" type="number" value="100" min="1" max="5000">
-<input id="since" type="date"></div>
-<div><label><input id="timestamps" type="checkbox"> timestamps</label>
-<label><input id="link_timestamps" type="checkbox"> clickable links</label>
-<label><input id="srt" type="checkbox"> .srt sidecars</label>
-<label><input id="clean" type="checkbox" checked> clean</label>
-<label><input id="transcribe" type="checkbox"> transcribe (no captions)</label>
-<label><input id="summarize" type="checkbox"> summarize</label>
-<input id="translate" placeholder="translate to: tr">
-<input id="bilingual" placeholder="bilingual: tr"></div>
-<div><label><input id="pdf" type="checkbox"> PDF</label>
-<label><input id="epub" type="checkbox"> EPUB</label>
-<input id="split" type="number" value="0" min="0" title="split every N words">
-<input id="workers" type="number" value="1" min="1" max="4"></div>
+<div class="grid2">
+<label class="field" for="name"><span>Output name</span><input id="name" value="" placeholder="auto (video title)"></label>
+<label class="field" for="lang"><span>Languages</span><input id="lang" placeholder="en or tr,en"></label>
+</div>
+<div class="grid2">
+<label class="field" for="max"><span>Max videos</span><input id="max" type="number" value="100" min="1" max="5000"></label>
+<label class="field" for="since"><span>Since</span><input id="since" type="date"></label>
+</div>
+</section>
+<section class="grp" aria-label="Output">
+<h2>Output</h2>
+<label class="field" for="layout"><span>Layout</span><select id="layout"><option>single</option><option>videos</option><option>tree</option></select></label>
+<div class="checks">
+<label class="check"><input id="timestamps" type="checkbox"> timestamps</label>
+<label class="check"><input id="link_timestamps" type="checkbox"> clickable links</label>
+<label class="check"><input id="srt" type="checkbox"> .srt sidecars</label>
+<label class="check"><input id="clean" type="checkbox" checked> clean</label>
+<label class="check"><input id="pdf" type="checkbox"> PDF</label>
+<label class="check"><input id="epub" type="checkbox"> EPUB</label>
+</div>
+</section>
+<section class="grp" aria-label="Options">
+<h2>Options</h2>
+<div class="grid2">
+<label class="field" for="split"><span>Split every N words (0 = off)</span><input id="split" type="number" value="0" min="0" title="split every N words"></label>
+<label class="field" for="workers"><span>Workers (1-4)</span><input id="workers" type="number" value="1" min="1" max="4"></label>
+</div>
+</section>
+<section class="grp" aria-label="AI">
+<h2>AI</h2>
+<div class="checks">
+<label class="check"><input id="transcribe" type="checkbox"> transcribe (no captions)</label>
+<label class="check"><input id="summarize" type="checkbox"> summarize</label>
+</div>
+<label class="field" for="translate"><span>Translate to</span><input id="translate" placeholder="translate to: tr"></label>
+<label class="field" for="bilingual"><span>Bilingual</span><input id="bilingual" placeholder="bilingual: tr"></label>
+</section>
+<div class="actions">
 <button id="go" type="button">Start</button>
 <button id="preview" type="button">Preview</button>
 <button id="local" type="button" title="Open the app on this machine (needs `tube2note serve` running)">Open local app</button>
+</div>
 </form>
+<div class="status">
 <p id="err"></p>
-<progress id="bar" value="0" max="100"></progress> <span id="nums"></span>
+<div class="prow"><progress id="bar" value="0" max="100"></progress> <span id="nums"></span></div>
 <pre id="log"></pre>
 <a id="dl" hidden>Download</a>
+</div>
+</main>
+</div>
 <script src="app.js"></script>
 <script>if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); }</script>
 </body>
