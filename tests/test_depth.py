@@ -80,3 +80,10 @@ def test_search_typed(home, capsys):
     assert "a.md" in capsys.readouterr().out
     search_collections("id:bbb", str(home))
     assert "b.md" in capsys.readouterr().out
+
+
+def test_sync_site_check():
+    import subprocess
+    r = subprocess.run(["python3", "docs/sync_site.py", "--check"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr

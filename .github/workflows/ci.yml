@@ -15,5 +15,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
       - run: ruff check
+      - run: python docs/sync_site.py --check
       - run: python -m tube2note --self-test
       - run: python -m pytest -q

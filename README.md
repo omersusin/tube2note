@@ -1,4 +1,4 @@
-<img src="docs/banner.png" alt="tube2note banner">
+<img src="https://raw.githubusercontent.com/omersusin/tube2note/main/docs/banner.png" alt="tube2note banner">
 
 [![PyPI](https://img.shields.io/pypi/v/tube2note)](https://pypi.org/project/tube2note/)
 [![Site](https://img.shields.io/badge/site-tube2note.github.io-blue)](https://omersusin.github.io/tube2note/)

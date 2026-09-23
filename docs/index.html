@@ -43,7 +43,7 @@ footer nav{display:flex;flex-wrap:wrap;gap:1rem;margin-top:.4rem}
 <body>
 <header class="hero">
 <img src="banner.png" alt="tube2note banner" style="max-width:100%;border-radius:12px">
-<p class="tag">Tube2Note is a YouTube to text tool for students, researchers, and anyone who works with videos. It turns channels, playlists, or single videos into clean Markdown transcripts you can study, search, or feed to NotebookLM.</p>
+<p class="tag">Tube2Note is a YouTube to text tool for students, researchers, and anyone who works with videos. It turns channels, playlists, or single videos into clean Markdown transcripts with timestamps and chapters. Then you can study them, search them offline, or feed them to AI tools like NotebookLM. If a run gets interrupted it picks up where it stopped. It can watch channels for new uploads, skip sponsor segments, write citations, and export SRT, PDF, EPUB, Anki flashcards, and Obsidian notes. It runs on Android, Windows, Mac, and Linux.</p>
 <div class="cta"><a class="primary" href="https://github.com/omersusin/tube2note">GitHub</a><a href="https://pypi.org/project/tube2note/">PyPI</a></div>
 <pre><code>curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh</code></pre>
 </header>
@@ -60,16 +60,14 @@ footer nav{display:flex;flex-wrap:wrap;gap:1rem;margin-top:.4rem}
 </div>
 <h2>Features</h2>
 <div class="grid">
-<div class="card"><h3>Resume</h3><p><code>--resume-last</code> picks up long runs where they stopped.</p></div>
-<div class="card"><h3>Watch</h3><p>Track channels, fetch only new uploads since last run.</p></div>
-<div class="card"><h3>Search</h3><p><code>tube2note search "query"</code> across saved transcripts, offline.</p></div>
-<div class="card"><h3>SRT + EPUB</h3><p>Per-video <code>.srt</code> sidecars and EPUB export for e-readers.</p></div>
-<div class="card"><h3>Chapters</h3><p>Transcripts grouped by video chapters with clickable links.</p></div>
-<div class="card"><h3>Citations</h3><p>APA, MLA, Chicago, BibTeX, and RIS for research.</p></div>
-<div class="card"><h3>Anki</h3><p>Flashcards generated from summaries.</p></div>
-<div class="card"><h3>Sponsor skip</h3><p>Sponsor segments cut before writing.</p></div>
-<div class="card"><h3>MCP</h3><p>Expose transcripts to MCP-aware assistants and agents.</p></div>
-<div class="card"><h3>API</h3><p>Local web UI and HTTP backend via <code>tube2note serve</code>.</p></div>
+<div class="card"><h3>Transcripts</h3><p>with timestamps & chapters</p></div>
+<div class="card"><h3>Resume & Watch Mode</h3><p></p></div>
+<div class="card"><h3>Offline Search</h3><p></p></div>
+<div class="card"><h3>Sponsor Skip</h3><p></p></div>
+<div class="card"><h3>Citations (Apa/Mla/Chicago/Bibtex)</h3><p></p></div>
+<div class="card"><h3>Exports</h3><p>SRT/VTT/TXT/PDF/EPUB/Anki/Obsidian exports</p></div>
+<div class="card"><h3>Ai Summarize/Translate/Transcribe</h3><p></p></div>
+<div class="card"><h3>Apps & API</h3><p>UI, mobile app, Python API & MCP server</p></div>
 </div>
 <h2>FAQ</h2>
 <details><summary>Why not paste links into NotebookLM?</summary><p>NotebookLM caps linked videos (~100) and needs captions per video. tube2note merges everything you control: timestamps, chapters, per-video files, resume.</p></details>
