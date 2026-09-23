@@ -42,12 +42,10 @@ footer nav{display:flex;flex-wrap:wrap;gap:1rem;margin-top:.4rem}
 </head>
 <body>
 <header class="hero">
-<h1><img src="icon-192.png" width="48" style="vertical-align:middle" alt="tube2note logo"> tube2note</h1>
-<p class="tag">YouTube channels, playlists, and videos &rarr; clean Markdown ready for NotebookLM.</p>
-<div class="cta"><a class="primary" href="https://github.com/omersusin/tube2note">GitHub</a><a href="https://pypi.org/project/tube2note/">PyPI</a><a href="https://catalyze-displease-kissable.ngrok-free.dev/">Live demo</a></div>
-<pre><code>pip install tube2note
-tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"</code></pre>
-<p><small class="note">Live demo runs on the developer's phone &mdash; available while it stays online. Prefer the browser? <a href="app.html">Try the web UI</a> or run <code>tube2note serve</code> locally.</small></p>
+<img src="banner.png" alt="tube2note banner" style="max-width:100%;border-radius:12px">
+<p class="tag">Tube2Note is a YouTube to text tool for students, researchers, and anyone who works with videos. It turns channels, playlists, or single videos into clean Markdown transcripts you can study, search, or feed to NotebookLM.</p>
+<div class="cta"><a class="primary" href="https://github.com/omersusin/tube2note">GitHub</a><a href="https://pypi.org/project/tube2note/">PyPI</a></div>
+<pre><code>curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh</code></pre>
 </header>
 <main>
 <h2>How it works</h2>
@@ -66,6 +64,10 @@ tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"</code></pr
 <div class="card"><h3>Watch</h3><p>Track channels, fetch only new uploads since last run.</p></div>
 <div class="card"><h3>Search</h3><p><code>tube2note search "query"</code> across saved transcripts, offline.</p></div>
 <div class="card"><h3>SRT + EPUB</h3><p>Per-video <code>.srt</code> sidecars and EPUB export for e-readers.</p></div>
+<div class="card"><h3>Chapters</h3><p>Transcripts grouped by video chapters with clickable links.</p></div>
+<div class="card"><h3>Citations</h3><p>APA, MLA, Chicago, BibTeX, and RIS for research.</p></div>
+<div class="card"><h3>Anki</h3><p>Flashcards generated from summaries.</p></div>
+<div class="card"><h3>Sponsor skip</h3><p>Sponsor segments cut before writing.</p></div>
 <div class="card"><h3>MCP</h3><p>Expose transcripts to MCP-aware assistants and agents.</p></div>
 <div class="card"><h3>API</h3><p>Local web UI and HTTP backend via <code>tube2note serve</code>.</p></div>
 </div>
@@ -73,7 +75,7 @@ tube2note -o channel.md "https://www.youtube.com/@SomeChannel/videos"</code></pr
 <details><summary>Why not paste links into NotebookLM?</summary><p>NotebookLM caps linked videos (~100) and needs captions per video. tube2note merges everything you control: timestamps, chapters, per-video files, resume.</p></details>
 <details><summary>What if a video has no captions?</summary><p>Transcribe mode covers caption-less videos, so the transcript still lands in your Markdown.</p></details>
 <details><summary>Will it get rate-limited?</summary><p>Runs are throttled, back off politely, and resume cleanly with <code>--resume-last</code>.</p></details>
-<details><summary>Where does the live demo run?</summary><p>On the developer's phone &mdash; handy for a peek. For real work, <code>pip install tube2note</code> and run it locally.</p></details>
+<details><summary>Where does the live demo run?</summary><p>On the developer's phone, handy for a peek. For real work, run the install command above and work locally.</p></details>
 </main>
 <footer>
 <p>tube2note &mdash; YouTube &rarr; Markdown for NotebookLM.</p>
