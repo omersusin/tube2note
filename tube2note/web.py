@@ -82,7 +82,16 @@ def build_argv(p, base_dir, python=None):
     for u in urls:
         if not URL_RE.match(u):
             raise ValueError(f"Not a YouTube URL: {u[:60]}")
-    name = sanitize_filename(str(p.get("name") or "tube2note").strip() or "tube2note")
+    raw_name = str(p.get("name") or "").strip()
+    if not raw_name:  # auto: name it after the video/channel like the TUI does
+        try:
+            from .naming import slug
+            from .source import expand as _expand
+            _vids, _hint = _expand(urls, 5)
+            raw_name = slug(_hint or (_vids[0].get("title") if _vids else "") or "tube2note")
+        except Exception:
+            raw_name = "tube2note"
+    name = sanitize_filename(raw_name) or "tube2note"
     if not name.lower().endswith(".md"):
         name += ".md"
     layout = p.get("layout") or "single"
@@ -583,7 +592,7 @@ pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:10px;m
 <label for="urls">YouTube URLs (one per line: channel, playlist or videos)</label>
 <textarea id="urls" placeholder="https://www.youtube.com/@SomeChannel/videos" autocapitalize="off" spellcheck="false"></textarea>
 <div class="row">
-<div><label for="name">Output name</label><input type="text" id="name" value="tube2note.md" autocapitalize="off"></div>
+<div><label for="name">Output name (empty = video title)</label><input type="text" id="name" value="" placeholder="auto (video title)" autocapitalize="off"></div>
 <div><label for="lang">Languages</label><input type="text" id="lang" placeholder="en or tr,en" autocapitalize="off"></div>
 </div>
 <label class="chk"><input type="checkbox" id="timestamps"> Keep [MM:SS] timestamps</label>
