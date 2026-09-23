@@ -29,10 +29,13 @@ need() { command -v "$1" >/dev/null 2>&1 || die "need '$1' (install python3 firs
 
 install_cli() {
     need python3
+    TAG="$(latest_tag || true)"
+    SPEC="tube2note"
+    case "$TAG" in v*) SPEC="tube2note==${TAG#v}";; esac
     if command -v pipx >/dev/null 2>&1; then
-        pipx install 'tube2note' || pipx reinstall 'tube2note' || die "install failed (see error above)"
+        pipx install "$SPEC" || pipx reinstall "$SPEC" || die "install failed (see error above)"
     elif python3 -m pip --version >/dev/null 2>&1; then
-        python3 -m pip install --user --no-cache-dir -U 'tube2note' || die "install failed (see error above — on Termux, try: pkg install clang)"
+        python3 -m pip install --user --no-cache-dir -U "$SPEC" || die "install failed (see error above — on Termux, try: pkg install clang)"
     else
         die "no pip found (try: pkg install python / apt install python3-pip)"
     fi
