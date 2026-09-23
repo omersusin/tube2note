@@ -1,6 +1,6 @@
 {
   "productName": "tube2note",
-  "version": "0.18.1",
+  "version": "1.0.0",
   "identifier": "com.omersusin.tube2note",
   "build": {
     "devUrl": "http://127.0.0.1:8765",
