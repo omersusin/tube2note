@@ -28,6 +28,25 @@ def _diag():
             f"cafile={cafile} yt-dlp={yt_dlp.version.__version__} flet={ft.__version__}")
 
 
+def _outdir():
+    """First writable tube2note folder: app storage, home, or cwd."""
+    for base in (os.environ.get("FLET_APP_STORAGE_DATA"),
+                 os.path.expanduser("~"), os.getcwd()):
+        if not base:
+            continue
+        p = os.path.join(base, "tube2note")
+        try:
+            os.makedirs(p, exist_ok=True)
+            probe = os.path.join(p, ".w")
+            with open(probe, "w") as f:
+                f.write("1")
+            os.unlink(probe)
+            return p
+        except OSError:
+            continue
+    return os.path.join(os.getcwd(), "tube2note")
+
+
 def main(page: ft.Page):
     page.title = "tube2note"
     page.scroll = ft.ScrollMode.AUTO
@@ -51,7 +70,7 @@ def main(page: ft.Page):
             bar.visible = False
             page.update()
             return
-        outdir = os.path.join(os.path.expanduser("~"), "tube2note")
+        outdir = _outdir()
         try:
             n = max(1, int(max_n.value or 20))
         except ValueError:
