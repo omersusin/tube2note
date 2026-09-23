@@ -4,9 +4,9 @@
 [![Site](https://img.shields.io/badge/site-tube2note.github.io-blue)](https://omersusin.github.io/tube2note/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-YouTube → readable text. Study, research, or feed it to NotebookLM. No tech skills needed — first file in 10 minutes.
+YouTube to readable text. Study, research, or feed it to NotebookLM. No tech skills needed. Your first file is ready in 10 minutes.
 
-Tube2Note is a YouTube-to-text tool for students, researchers, and anyone who works with videos. It lets you turn channels, playlists, or single videos into clean Markdown transcripts with timestamps and chapters, then study them, search them offline, or feed them to AI tools like NotebookLM. Along the way it resumes interrupted runs, watches channels for new uploads, skips sponsor segments, writes citations, and exports SRT, PDF, EPUB, Anki flashcards, and Obsidian notes — on Android, Windows, Mac, and Linux.
+Tube2Note is a YouTube to text tool for students, researchers, and anyone who works with videos. It turns channels, playlists, or single videos into clean Markdown transcripts with timestamps and chapters. Then you can study them, search them offline, or feed them to AI tools like NotebookLM. If a run gets interrupted it picks up where it stopped. It can watch channels for new uploads, skip sponsor segments, write citations, and export SRT, PDF, EPUB, Anki flashcards, and Obsidian notes. It runs on Android, Windows, Mac, and Linux.
 
 ```bash
 curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh
@@ -51,7 +51,7 @@ We use the free **Termux** app to run it on your phone.
 ### 1. Install Termux
 
 - **Install from F-Droid** (recommended): download F-Droid from [f-droid.org](https://f-droid.org), then install **Termux** from inside F-Droid.
-- Don't use the Play Store version — it's outdated.
+- Do not use the Play Store version, it is outdated.
 
 ### 2. Install the needed pieces
 
@@ -119,7 +119,7 @@ It asks questions, you answer:
 
 Your `.md` file lands in the folder when done. You can watch the progress bar.
 
-> **Interrupted? No problem.** If the internet drops or you close the app, run the same command again — it resumes where it stopped.
+> **Interrupted? No problem.** If the internet drops or you close the app, run the same command again. It resumes where it stopped.
 
 ---
 
@@ -171,7 +171,7 @@ Open NotebookLM → "Add source" → upload the `.md` file from your device. One
 They're skipped and listed under `## Skipped`. Optionally, AI transcription is available (see Advanced).
 
 **It's slow / stuck — what now?**
-YouTube sometimes throttles downloads. The program already slows down automatically. If nothing moves: stop it, **wait ~1 hour**, run again — it resumes.
+YouTube sometimes throttles downloads. The program already slows down automatically. If nothing moves, stop it, **wait about 1 hour**, and run again. It resumes.
 
 **My device turned off — start over?**
 No. Run the same command again, it continues.
@@ -246,7 +246,7 @@ For enthusiasts and developers. Not needed for normal use.
 
 ## Feedback (we read everything)
 
-Found a bug? Want a feature? Tell us — it shapes what gets built next:
+Found a bug? Want a feature? Tell us. It shapes what gets built next:
 
 - 🐞 [Report a bug](https://github.com/omersusin/tube2note/issues/new?template=bug_report.md)
 - 💡 [Request a feature](https://github.com/omersusin/tube2note/issues/new?template=feature_request.md)
