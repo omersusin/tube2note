@@ -5,6 +5,10 @@ on:
     tags: ["v*"]
 jobs:
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64-v8a, x86_64, armeabi-v7a]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,7 +18,7 @@ jobs:
       - run: pip install -U "flet==1.0.*" yt-dlp certifi
       - name: Restore upload keystore
         run: echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > $RUNNER_TEMP/upload.jks
-      - run: flet build apk --yes --org com.omersusin --project tube2note --module-name mobile_main --verbose --output build-apk
+      - run: flet build apk --yes --org com.omersusin --project tube2note --module-name mobile_main --arch ${{ matrix.arch }} --verbose --output build-apk
         env:
           FLET_ANDROID_SIGNING_KEY_STORE: ${{ runner.temp }}/upload.jks
           FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -22,5 +26,5 @@ jobs:
           FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASS }}
       - uses: actions/upload-artifact@v4
         with:
-          name: tube2note-apk
+          name: tube2note-apk-${{ matrix.arch }}
           path: build-apk/*.apk
