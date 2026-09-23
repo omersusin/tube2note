@@ -12,6 +12,14 @@ Turn a YouTube channel, playlist, or videos into **readable text files**. Study,
 
 > **No technical background needed.** Follow the steps in order — your first file will be ready in 10 minutes.
 
+**Fastest way (one line):**
+
+```bash
+curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh
+```
+
+It detects your system, asks app-or-CLI, installs, and verifies. Prefer manual steps? Keep reading.
+
 ---
 
 ## Contents
@@ -209,6 +217,18 @@ For enthusiasts and developers. Not needed for normal use.
 **Automation:** `tube2note status folder --json`, exit codes (0 = ok, 1 = partial, 2 = fatal), `YT2MD_*` env vars, profiles in `~/.config/yt2md/config.json`.
 
 **Developers:** `import tube2note.api` (collect/list/status), `tube2note mcp` (Claude/AI assistant link), `tube2note serve-api` (site backend, FastAPI). Dev setup: `pip install -e ".[dev]" && pytest && ruff check`. Version tags (`v*`) auto-publish to PyPI.
+
+---
+
+## Feedback (we read everything)
+
+Found a bug? Want a feature? Tell us — it shapes what gets built next:
+
+- 🐞 [Report a bug](https://github.com/omersusin/tube2note/issues/new?template=bug_report.md)
+- 💡 [Request a feature](https://github.com/omersusin/tube2note/issues/new?template=feature_request.md)
+- 💬 [General feedback](https://github.com/omersusin/tube2note/issues/new) (anything else)
+
+Paste the failing command + the error text. Screenshots welcome.
 
 ## License
 

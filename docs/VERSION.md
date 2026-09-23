@@ -1,4 +1,15 @@
-[![version v0.18.0](https://img.shields.io/badge/version-v0.18.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.18.0)
+[![version v0.19.0](https://img.shields.io/badge/version-v0.19.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.19.0)
+
+## v0.18.1
+9e1a8bd Sync tauri bundle version to 0.18.1
+6df22d2 v0.18.1
+d17549d Fix mobile AI section overlap: short labels + key note caption
+
+## v0.18.0
+7ee26a8 v0.18.0: chapters, sponsorblock, cite, anki, vtt, obsidian depth, UX pass (147 tests)
+0b05fc2 Docs: memory + agents from full 310-message history
+578c7d6 Add AGENTS.md contributor contract
+ff03e77 Design pass: serve/mobile/site dark brand, logos, PWA heads
 
 ## v0.17.1
 c040396 0.17.1: recovered agent fixes (mobile/server/vtt/throttle/store/mcp/docs)
