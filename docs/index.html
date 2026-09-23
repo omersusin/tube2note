@@ -45,7 +45,7 @@ footer nav{display:flex;flex-wrap:wrap;gap:1rem;margin-top:.4rem}
 <img src="banner.png" alt="tube2note banner" style="max-width:100%;border-radius:12px">
 <p class="tag">Tube2Note is a YouTube to text tool for students, researchers, and anyone who works with videos. It turns channels, playlists, or single videos into clean Markdown transcripts with timestamps and chapters. Then you can study them, search them offline, or feed them to AI tools like NotebookLM. If a run gets interrupted it picks up where it stopped. It can watch channels for new uploads, skip sponsor segments, write citations, and export SRT, PDF, EPUB, Anki flashcards, and Obsidian notes. It runs on Android, Windows, Mac, and Linux.</p>
 <div class="cta"><a class="primary" href="https://github.com/omersusin/tube2note">GitHub</a><a href="https://pypi.org/project/tube2note/">PyPI</a></div>
-<pre><code>curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh</code></pre>
+<pre><code id="installcmd">curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh</code> <button onclick="navigator.clipboard.writeText(document.getElementById('installcmd').innerText);this.textContent='Copied'" style="cursor:pointer;background:#161a22;border:1px solid #2a3140;border-radius:6px;color:#e8ecf1;padding:.2em .6em" title="Copy">⧉</button></pre>
 </header>
 <main>
 <h2>How it works</h2>

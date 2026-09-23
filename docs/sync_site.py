@@ -50,7 +50,7 @@ def build(tagline, desc, feats):
         f"<p class=\"tag\">{desc}</p>\n"
         "<div class=\"cta\"><a class=\"primary\" href=\"https://github.com/omersusin/tube2note\">GitHub</a>"
         "<a href=\"https://pypi.org/project/tube2note/\">PyPI</a></div>\n"
-        f"<pre><code>{INSTALL_CMD}</code></pre>\n"
+        f"<pre><code id=\"installcmd\">{INSTALL_CMD}</code> <button onclick=\"navigator.clipboard.writeText(document.getElementById('installcmd').innerText);this.textContent='Copied'\" style=\"cursor:pointer;background:#161a22;border:1px solid #2a3140;border-radius:6px;color:#e8ecf1;padding:.2em .6em\" title=\"Copy\">⧉</button></pre>\n"
         "</header>"
     )
     html = re.sub(r"<header class=\"hero\">.*?</header>", hero, html, flags=re.S)
