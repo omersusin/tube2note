@@ -21,6 +21,9 @@ smallest working diff, never break Termux.
   small maintainer fixes. Delete merged remote branches.
 - Commit identity via `-c user.name=omersusin
   -c user.email=86467497+omersusin@users.noreply.github.com` (never global config).
+- Research first (clone to scratch, delete after), plan-mode discussion later —
+  plan mode is read-only, so all downloading happens in build mode.
+- Never hardcode user-provided examples (channels, URLs, sample data).
 
 ## Code rules
 - Ponytail: shortest working diff wins. No speculative abstractions, no
