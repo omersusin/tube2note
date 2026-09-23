@@ -201,19 +201,46 @@ Yes, completely free and open source (MIT). Optional AI features use Google's fr
 
 For enthusiasts and developers. Not needed for normal use.
 
-**Command-line options** (languages, splitting, cleaning, speed, 40+ flags): run `tube2note --help`. Key ones: `--lang tr,en`, `--timestamps`, `--link-timestamps` (clickable minutes), `--ts-every 30`, `--single-line`, `--srt`, `--txt`, `--pdf`, `--epub`, `--obsidian`, `--split-words`, `--since YYYY-MM-DD`, `--resume-last`, `--redo VIDEO_ID`, `--fresh`, `--proxy`, `--cookies`, `--cookies-from-browser chrome`, `--workers 2`, `--jsonl` (JSON lines for scripts), `-o -` (print transcript to terminal instead of a file), `--bilingual tr` (two languages side by side), `--clean-level light`, `--no-dedupe`, `--engine local`, `--yes`, `--name-template "..."`, `watch --daemon` / `watch --stop` (background watching).
+**Command-line options** (`tube2note --help` for all 40+):
 
-**AI features** (need a free `GEMINI_API_KEY` from [aistudio.google.com](https://aistudio.google.com)): `--transcribe` (transcribe captionless video), `--summarize` (summary per video), `--translate tr`, `--gemini-model`.
+| Flag | What it does |
+|---|---|
+| `--lang tr,en` | Transcript languages, in priority order |
+| `--timestamps` / `--link-timestamps` | Keep `[MM:SS]` markers / make them clickable |
+| `--ts-every 30` | One marker every 30s instead of every line |
+| `--single-line` | Whole transcript on one line (for RAG) |
+| `--split-words N` | Split output into N-word parts |
+| `--since YYYY-MM-DD` | Only videos newer than date |
+| `--resume-last` / `--redo ID` / `--fresh` | Resume last job / redo one video / start over |
+| `--srt` / `--vtt` / `--txt` | Sidecar files per video |
+| `--pdf` / `--epub` | Ebook exports |
+| `--obsidian` | Tags + aliases for Obsidian vaults |
+| `--chapters` | Group transcript by video chapters |
+| `--sponsorblock` | Cut sponsor segments before writing |
+| `--cite` | APA/MLA/Chicago citations + .bib/.ris |
+| `--anki` | Flashcards from summaries (needs `--summarize`) |
+| `--bilingual tr` | Source + translation side by side |
+| `--jsonl` | Machine-readable lines for scripts |
+| `-o -` | Print to terminal instead of file |
+| `--cookies` / `--cookies-from-browser` | Age-gated / private videos |
+| `--proxy` / `--workers` / `--yes` | Network, speed, skip confirmations |
+| `watch --daemon` / `watch --stop` | Background channel watching |
 
-**Use from a browser page:** run `tube2note serve` — a page opens on your device to manage jobs.
+**AI features** (free `GEMINI_API_KEY` from [aistudio.google.com](https://aistudio.google.com)):
 
-**Obsidian users:** `--obsidian --layout videos` adds tags + aliases to notes.
+| Flag | What it does |
+|---|---|
+| `--transcribe` | Transcribe videos with no captions |
+| `--summarize` | Summary per video |
+| `--translate tr` | Translate transcript |
+| `--gemini-model` | Pick the model |
 
-**Enrich output:** `--vtt` (.vtt sidecars), `--anki` (flashcards from summaries, needs `--summarize`), `--chapters` (group transcript by video chapters), `--sponsorblock` (skip sponsor segments), `--cite` (APA/MLA/Chicago/BibTeX/RIS citations).
-
-**Automation:** `tube2note status folder --json`, exit codes (0 = ok, 1 = partial, 2 = fatal), `YT2MD_*` env vars, profiles in `~/.config/yt2md/config.json`.
-
-**Developers:** `import tube2note.api` (collect/list/status), `tube2note mcp` (Claude/AI assistant link), `tube2note serve-api` (site backend, FastAPI). Dev setup: `pip install -e ".[dev]" && pytest && ruff check`. Version tags (`v*`) auto-publish to PyPI.
+| Other | |
+|---|---|
+| `tube2note serve` | Browser page on your device to manage jobs |
+| `tube2note status folder --json` | Machine-readable job status |
+| `YT2MD_*` env / profiles | Defaults in `~/.config/yt2md/config.json` |
+| Python / MCP / API | `import tube2note.api`, `tube2note mcp`, `tube2note serve-api` |
 
 ---
 
