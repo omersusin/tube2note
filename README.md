@@ -31,6 +31,50 @@ curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh
 **4. Search.** Find any sentence across all saved notes, offline.
 
 ![search](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-5-search.png)
+
+**5. Check.** Doctor verifies every piece is working.
+
+![doctor](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-2-doctor.png)
+
+**6. Serve.** Run the browser UI on your own device.
+
+![serve](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-6-serve.png)
+
+**7. Watch.** Track channels in the background, fetch only new videos.
+
+![watch](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-7-watch.png)
+
+**8. Resume.** Same command again picks up where it stopped.
+
+![resume](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-8-resume.png)
+
+**9. Status.** See what finished, what was skipped, how big.
+
+![status](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-9-status.png)
+
+**10. Chapters.** Transcripts grouped by video chapters.
+
+![chapters](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-10-chapters.png)
+
+**11. Sponsor skip.** Ads cut before writing.
+
+![sponsor](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-11-sponsor.png)
+
+**12. Ebooks.** PDF and EPUB for readers.
+
+![ebook](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-12-ebook.png)
+
+**13. Obsidian.** Notes land in your vault with tags.
+
+![obsidian](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-13-obsidian.png)
+
+**14. Guided mode.** Just run `tube2note` and answer questions.
+
+![guided](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-14-tui.png)
+
+**15. AI.** Free key adds summaries, translation, transcription.
+
+![ai](https://raw.githubusercontent.com/omersusin/tube2note/main/docs/shots/intro-15-ai.png)
 offline search · sponsor skip · citations (APA/MLA/Chicago/BibTeX) ·
 SRT/VTT/TXT/PDF/EPUB/Anki/Obsidian exports · AI summarize/translate/transcribe ·
 web UI, mobile app, Python API & MCP server.
