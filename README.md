@@ -6,7 +6,7 @@
 
 YouTube → readable text. Study, research, or feed it to NotebookLM. No tech skills needed — first file in 10 minutes.
 
-**What it does:** paste a YouTube channel, playlist, or video link and get clean Markdown transcripts — with timestamps, chapters, and per-video files. It resumes interrupted runs, watches channels for new uploads, skips sponsor segments, writes citations (APA/MLA/Chicago), and exports SRT, VTT, TXT, PDF, EPUB, Anki flashcards, and Obsidian notes. Optional AI (free Gemini key) adds transcription for captionless videos, summaries, and translation. Runs on Android (Termux), Windows, Mac, and Linux; also a local web UI, a mobile app, and a Python API.
+**What it does:** Tube2Note is a YouTube-to-text tool for students, researchers, and anyone who works with videos. It lets you turn channels, playlists, or single videos into clean Markdown transcripts with timestamps and chapters, then study them, search them offline, or feed them to AI tools like NotebookLM. Along the way it resumes interrupted runs, watches channels for new uploads, skips sponsor segments, writes citations, and exports SRT, PDF, EPUB, Anki flashcards, and Obsidian notes — on Android, Windows, Mac, and Linux.
 
 ```bash
 curl -fsSL https://omersusin.github.io/tube2note/install.sh | sh
