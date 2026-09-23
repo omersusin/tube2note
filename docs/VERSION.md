@@ -1,4 +1,27 @@
-[![version v0.17.0](https://img.shields.io/badge/version-v0.17.0-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.17.0)
+[![version v0.17.1](https://img.shields.io/badge/version-v0.17.1-blue)](https://github.com/omersusin/tube2note/releases/tag/v0.17.1)
+
+## v0.17.0
+ec41884 0.17.0: swarm hardening round (10 agents, recovered)
+caa95c1 Serve: auto output name from video title
+447d03b Mobile: dark theme + red seed (serve look)
+88ce686 Mobile: Gemini AI options (transcribe/summarize/translate+key)
+aafeb0d Mobile: auto output name from video title
+9e0cc23 Mobile: output name, preview, files list (serve parity)
+de9130f Flet CI: per-ABI parallel matrix
+1d48c0d Mobile: full options parity with serve UI
+dee17bf Mobile: writable outdir probe (fix /data permission)
+187ae43 Brand app icon: adaptive mark + charcoal background
+c34fd7b Flet 1.x migration: run/Button/async/diagnostics/pin
+3a17821 APK: bundle flet on Android only (CLI stays light)
+57eab80 Flet: split-per-ABI, R8 defaults locked
+b16afa1 APK deps: yt-dlp[default] + certifi (bundled, not host)
+7e8d839 Flet CI: signed release build via secrets
+a509836 Flet CI: add certifi
+3ef97f6 Split run_job god-function: fetch/write/resume helpers, no behavior change
+e1d53d5 Flet CI: module-name entry
+1b12684 Flet CI: non-interactive flags
+29e0364 Flet mobile app + APK workflow
+23051d3 Fix ruff in test_v16 (applier rewrite)
 
 ## v0.16.0
 bd52dfd 0.16.0: ts-every, single-line, txt sidecars (v16 pack)

@@ -615,6 +615,7 @@ pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:10px;m
 <label class="chk"><input type="checkbox" id="summarize"> Summarize each video</label>
 <label class="chk"><input type="checkbox" id="transcribe"> Transcribe videos without captions</label>
 <label for="translate">Translate to (language code, optional)</label><input type="text" id="translate" placeholder="tr" autocapitalize="off">
+<label for="bilingual">Bilingual source+translation (language code, optional)</label><input type="text" id="bilingual" placeholder="tr" autocapitalize="off">
 </details></div>
 <p class="hint">Re-using the same output name resumes where it stopped.</p>
 <p class="err" id="err" role="alert"></p>
@@ -634,7 +635,7 @@ pre{background:var(--code);color:var(--codefg);border-radius:10px;padding:10px;m
 </div></div>
 <script nonce="__NONCE__">
 const $=id=>document.getElementById(id);
-const FIELDS=["urls","name","lang","layout","max","since","split_words","workers","translate"];
+const FIELDS=["urls","name","lang","layout","max","since","split_words","workers","translate","bilingual"];
 const BOOLS=["timestamps","link_timestamps","srt","clean","pdf","epub","summarize","transcribe"];
 let busy=false,timer=null,seeded=false;
 function save(){try{const o={};FIELDS.forEach(f=>o[f]=$(f).value);BOOLS.forEach(f=>o[f]=$(f).checked);localStorage.setItem("t2n",JSON.stringify(o))}catch(e){}}

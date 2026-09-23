@@ -29,6 +29,19 @@ try:
     MAX_JOBS = max(1, min(32, int(os.environ.get("BACKEND_MAX_JOBS", "4"))))
 except (TypeError, ValueError):
     MAX_JOBS = 4  # global cap: no fork-bombs via spoofed IP headers
+MAX_JOBS_ENTRIES = 128  # total entries cap: dict-flood guard
+
+
+def _prune_jobs(now):
+    for k in [k for k, (_, t) in JOBS.items() if now - t > 24 * 3600]:
+        JOBS.pop(k, None)
+    while len(JOBS) > MAX_JOBS_ENTRIES:
+        oldest = min(JOBS, key=lambda k: JOBS[k][1])
+        try:
+            JOBS[oldest][0].stop()
+        except Exception:
+            pass
+        JOBS.pop(oldest, None)
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"],
@@ -84,8 +97,7 @@ async def start(req: Request, x_token: Optional[str] = Header(None)):
         raise HTTPException(400, "need 1-50 youtube.com/youtu.be urls")
     ip = _ip(req)
     now = time.time()
-    for k in [k for k, (_, t) in JOBS.items() if now - t > 24 * 3600]:
-        JOBS.pop(k, None)
+    _prune_jobs(now)
     if _live(JOBS.get(ip)):
         raise HTTPException(409, "job already running")
     live = sum(1 for j in JOBS.values() if _live(j))
