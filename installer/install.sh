@@ -104,8 +104,11 @@ if [ -n "$NONINTERACTIVE" ]; then
     install_cli
 elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
     if [ -n "$IS_TERMUX" ]; then
-        printf '%s ' "$Q" >/dev/tty; read -r ans </dev/tty || ans=""
-        case "$ans" in [Aa]*) install_app;; *) install_cli;; esac
+        if printf '%s ' "$Q" >/dev/tty 2>/dev/null && read -r ans </dev/tty 2>/dev/null; then
+            case "$ans" in [Aa]*) install_app;; *) install_cli;; esac
+        else
+            install_cli
+        fi
     elif ask "$Q" N; then
         install_app
     else
