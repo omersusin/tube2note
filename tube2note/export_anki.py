@@ -23,16 +23,21 @@ def summary_to_cards(summary, tag="tube2note", max_cards=10, **kw):
         max_cards, tag = tag, "tube2note"
     max_cards = kw.pop("limit", kw.pop("max", max_cards))
     try:
-        max_cards = min(10, max(0, int(max_cards)))
+        want = int(max_cards)
     except (TypeError, ValueError):
-        max_cards = 10
+        print(f"warning: bad max_cards {max_cards!r}, using 10", flush=True)
+        want, max_cards = 10, 10
+    else:
+        max_cards = min(10, max(0, want))
+        if max_cards != want:
+            print(f"warning: clamping max_cards {want} to {max_cards}", flush=True)
     cards = []
     for ln in str(summary or "").splitlines():
         m = BULLET_RE.match(ln)
         if not m:
             continue
         front, back = _split(m.group(1))
-        if front:
+        if front.strip() or back.strip():
             cards.append((front, back))
         if len(cards) >= max_cards:
             break
@@ -52,7 +57,7 @@ def _norm(cards):
             b = str(c[1]) if len(c) > 1 else ""
             t = str(c[2]) if len(c) > 2 else ""
             out.append((f, b, t))
-    return out
+    return [c for c in out if c[0].strip() or c[1].strip()]
 
 
 def cards_to_csv(cards, tag="tube2note"):

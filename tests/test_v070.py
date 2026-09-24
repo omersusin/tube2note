@@ -21,12 +21,44 @@ def test_subs(tmp_path):
 
 def test_pwa_files():
     import os
+    import re
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    assert os.path.exists(os.path.join(root, "docs", "app.js"))
-    assert os.path.exists(os.path.join(root, "docs", "sw.js"))
-    assert "X-Token" in open(os.path.join(root, "docs", "app.js")).read()
-    assert "/api/" in open(os.path.join(root, "docs", "sw.js")).read()
+    js = open(os.path.join(root, "docs", "app.js"), encoding="utf-8").read()
+    assert "X-Token" in js and "/api/start" in js and "/api/download?path=" in js
+    assert "&t=" in js  # ?t= fallback for <a> navigation
+    html = open(os.path.join(root, "docs", "app.html"), encoding="utf-8").read()
+    ids = set(re.findall(r'id="([^"]+)"', html))
+    # every app.js payload key must be accepted by backend build_argv (split->split_words alias)
+    from tube2note.web import build_argv
+    payload_keys = set(re.findall(r'(\w+): \$', js)) | {"urls", "name", "lang", "layout", "max",
+        "since", "timestamps", "clean", "link_timestamps", "srt", "vtt", "anki",
+        "chapters", "sponsorblock", "cite", "obsidian", "transcribe", "summarize",
+        "translate", "bilingual", "pdf", "epub", "cookies", "cookies_from_browser",
+        "split_words", "workers"}
+    base = {"urls": ["https://www.youtube.com/watch?v=aaaaaaaaaaa"], "name": "x.md"}
+    for k in payload_keys:
+        if k in ("urls", "split"):
+            continue
+        probe = dict(base)
+        probe[k] = _val(k)
+        build_argv(probe, "/tmp/x")  # must not raise "bad request" for known keys
+    for k in payload_keys:
+        assert k in ids or k == "split_words", k
+    assert "split" in ids  # frontend id for split_words
+
+
+def _val(k):
+    return {"translate": "tr", "bilingual": "de", "max": 5, "split_words": 0,
+            "workers": 1, "since": "2024-01-01", "lang": "en", "layout": "single",
+            "name": "x.md", "cookies": "/tmp/c.txt",
+            "cookies_from_browser": "chrome"}.get(k, True)
 
 def test_server_api_shape():
-    import importlib.util
-    assert importlib.util.find_spec("tube2note.server_api") is not None
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "tube2note", "server_api.py"), encoding="utf-8").read()
+    assert '@app.get("/healthz")' in src and '@app.post("/api/start")' in src
+    assert '@app.get("/api/download")' in src and "x_token" in src
+    assert "youtube.com" in src and "youtu.be" in src  # allow-list, not regex
+    assert "MAX_JOBS" in src and "MAX_JOBS_ENTRIES" in src
+    assert "_is_trusted_proxy" in src and "TRUSTED_PROXIES" in src  # proxy-header guard

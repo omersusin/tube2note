@@ -83,8 +83,22 @@ def _pdf_font(pdf):
 
 
 def _has_cjk(lines):
-    return any("一" <= ch <= "鿿" or "぀" <= ch <= "ヿ" or "가" <= ch <= "힯"
-               for ln in lines for ch in ln)
+    """True if text needs a Unicode font: CJK, Arabic, Hebrew, emoji/symbols."""
+    for ln in lines:
+        for ch in ln:
+            o = ord(ch)
+            if (0x3400 <= o <= 0x4DBF or 0x4E00 <= o <= 0x9FFF or 0x20000 <= o <= 0x2EBEF
+                    or 0x3040 <= o <= 0x30FF or 0xAC00 <= o <= 0xD7AF
+                    or 0x1100 <= o <= 0x11FF or 0x3130 <= o <= 0x318F):
+                return True  # CJK / kana / hangul
+            if (0x0600 <= o <= 0x06FF or 0x0750 <= o <= 0x077F or 0x08A0 <= o <= 0x08FF
+                    or 0xFB50 <= o <= 0xFDFF or 0xFE70 <= o <= 0xFEFF
+                    or 0x0590 <= o <= 0x05FF):
+                return True  # Arabic / Hebrew
+            if (0x2600 <= o <= 0x27BF or 0x2B00 <= o <= 0x2BFF or 0x1F000 <= o <= 0x1FAFF
+                    or 0xFE00 <= o <= 0xFE0F or o == 0x200D or 0x2190 <= o <= 0x21FF):
+                return True  # emoji / symbols
+    return False
 
 
 def md_to_pdf(md_path, pdf_path=None, meta=None, **kw):
@@ -118,7 +132,8 @@ def md_to_pdf(md_path, pdf_path=None, meta=None, **kw):
     font, uni = _pdf_font(pdf)
     pdf._footfont = font
     if not uni:
-        print("warning: no Unicode font found — non-latin glyphs will be folded to ASCII", flush=True)
+        raise SystemExit("PDF needs a Unicode TTF (DejaVu/Noto/CJK) — none found; "
+                         "install dejavu-fonts or set a system font")
     try:
         with open(md_path, encoding="utf-8", errors="replace") as f:
             raw_text = f.read()
@@ -190,7 +205,9 @@ def md_to_pdf(md_path, pdf_path=None, meta=None, **kw):
             mc(6, "• " + text)
         else:
             mc(6, text)
-    pdf.output(pdf_path)
+    tmp = pdf_path + ".tmp"
+    pdf.output(tmp)
+    os.replace(tmp, pdf_path)
     return pdf_path
 
 

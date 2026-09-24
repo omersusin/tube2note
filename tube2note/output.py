@@ -8,6 +8,40 @@ import re
 from .ui import table
 
 
+def _atomic_write(path, data):
+    """Write utf-8 text atomically (tmp + os.replace, no half-written files)."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def _wcount(s):
+    """Words in a string without building a split list."""
+    n, in_w = 0, False
+    for ch in s:
+        if ch.isspace():
+            in_w = False
+        elif not in_w:
+            n += 1
+            in_w = True
+    return n
+
+
+def _count_words_file(path):
+    """Streaming word count for a file (never loads it whole)."""
+    n = 0
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            for ln in f:
+                n += _wcount(ln)
+    except OSError as e:
+        if getattr(e, "errno", None) == 28:
+            raise
+        return 0
+    return n
+
+
 def _purge_jsonl(out, vid):
     """Drop one video's rows from <out>.jsonl (atomic replace)."""
     p = out + ".jsonl"
@@ -15,7 +49,9 @@ def _purge_jsonl(out, vid):
         return False
     try:
         lines = open(p, encoding="utf-8").read().splitlines()
-    except OSError:
+    except OSError as e:
+        if getattr(e, "errno", None) == 28:
+            raise
         return False
     kept, dropped = [], False
     for ln in lines:
@@ -34,7 +70,9 @@ def _purge_jsonl(out, vid):
         try:
             open(tmp, "w", encoding="utf-8").write(("\n".join(kept) + "\n") if kept else "")
             os.replace(tmp, p)
-        except OSError:
+        except OSError as e:
+            if getattr(e, "errno", None) == 28:
+                raise
             return False
     return dropped
 
@@ -65,9 +103,11 @@ def _purge_video(out, root, layout, vid):
             lines = open(done_log, encoding="utf-8").read().splitlines()
             kept = [ln for ln in lines if ln.strip() != vid]
             if len(kept) != len(lines):
-                open(done_log, "w", encoding="utf-8").write("\n".join(kept) + ("\n" if kept else ""))
+                _atomic_write(done_log, "\n".join(kept) + ("\n" if kept else ""))
                 removed.append("done-log")
-        except OSError:
+        except OSError as e:
+            if getattr(e, "errno", None) == 28:
+                raise
             pass
     skip_log = out + ".skip"
     if os.path.exists(skip_log):
@@ -96,9 +136,11 @@ def _purge_video(out, root, layout, vid):
                     continue
                 kept.append(ln)
             if changed:
-                open(skip_log, "w", encoding="utf-8").write("\n".join(kept) + ("\n" if kept else ""))
+                _atomic_write(skip_log, "\n".join(kept) + ("\n" if kept else ""))
                 removed.append("skip-log")
-        except OSError:
+        except OSError as e:
+            if getattr(e, "errno", None) == 28:
+                raise
             pass
     cdir = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
                         "tube2note", "subs")
@@ -106,7 +148,9 @@ def _purge_video(out, root, layout, vid):
         try:
             os.remove(p)
             removed.append("cache")
-        except OSError:
+        except OSError as e:
+            if getattr(e, "errno", None) == 28:
+                raise
             pass
     if os.path.exists(out):
         try:
@@ -114,9 +158,11 @@ def _purge_video(out, root, layout, vid):
             parts = raw.split("---\n\n")
             kept = [parts[0]] + [p for p in parts[1:] if f"Video ID: {vid}\n" not in p]
             if len(kept) != len(parts):
-                open(out, "w", encoding="utf-8").write("---\n\n".join(kept))
+                _atomic_write(out, "---\n\n".join(kept))
                 removed.append("combined-md")
-        except OSError:
+        except OSError as e:
+            if getattr(e, "errno", None) == 28:
+                raise
             pass
     if layout != "single":
         for dirpath, _, files in os.walk(root):
@@ -128,16 +174,18 @@ def _purge_video(out, root, layout, vid):
                     try:
                         os.remove(p)
                         removed.append("per-video-file")
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        if getattr(e, "errno", None) == 28:
+                            raise
                     for ext in (".srt", ".txt"):
                         side = os.path.splitext(p)[0] + ext
                         try:
                             if os.path.exists(side):
                                 os.remove(side)
                                 removed.append("sidecar")
-                        except OSError:
-                            pass
+                        except OSError as e:
+                            if getattr(e, "errno", None) == 28:
+                                raise
     base = os.path.splitext(os.path.basename(out))[0]
     for ext in (".srt", ".txt"):
         side = os.path.join(root, f"{base}_{vid}{ext}")
@@ -145,7 +193,9 @@ def _purge_video(out, root, layout, vid):
             if os.path.exists(side):
                 os.remove(side)
                 removed.append("sidecar")
-        except OSError:
+        except OSError as e:
+            if getattr(e, "errno", None) == 28:
+                raise
             pass
     return removed
 
@@ -159,7 +209,7 @@ def split_output(out, budget):
     base, ext = os.path.splitext(out)
     parts, cur, curw, idx = [], [], 0, 0
     for s in sections:
-        w = len(s.split())
+        w = _wcount(s)
         if cur and curw + w > budget:
             parts.append((idx + 1, cur))
             cur, curw, idx = [], 0, idx + 1
@@ -172,11 +222,12 @@ def split_output(out, budget):
     paths = []
     for i, secs in parts:
         lines = head.split("\n")
-        if lines:
-            lines[0] += f" (part {i}/{len(parts)})"
+        for li, lv in enumerate(lines):  # patch title:, never the --- fence
+            if re.match(r"\s*title\s*:", lv):
+                lines[li] = lv + f" (part {i}/{len(parts)})"
+                break
         p = f"{base}_part{i:02d}{ext}"
-        with open(p, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + ("---\n\n".join(secs)) + "---\n")
+        _atomic_write(p, "\n".join(lines) + ("---\n\n".join(secs)) + "---\n")
         paths.append(p)
     return paths
 
@@ -194,15 +245,22 @@ def _fmt_dur(secs):
 
 def _frontmatter(title, wurl, channel, vid, lg, auto, meta=None, obsidian=False):
     def clean(s):
-        s = " ".join(str(s).split()).replace('"', "'").replace("\\", "/")
+        s = " ".join(str(s).split()).replace("\\", "/").replace('"', "'")
         return s.strip() or "unknown"
-    def qs(s):
-        return '"{}"'.format(str(s).replace('"', "'"))
+    def qs(s):  # collapse WS (kills newline injection), neutralize " and \
+        return '"{}"'.format(" ".join(str(s).split()).replace("\\", "/").replace('"', "'"))
+    def yq(s):  # bare when YAML-plain-safe (keeps dates/ints readable), else quoted
+        s = " ".join(str(s).split()).replace("\\", "/").replace('"', "'")
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _.,:/+()~-]*", s or "") and ": " not in s:
+            return s
+        return f'"{s}"'
     t = clean(title or vid)
     c = clean(channel or "unknown")
+    vid = re.sub(r"[^\w-]", "", str(vid).split()[0] if str(vid).split() else "") or "unknown"
+    lg = re.sub(r"[^A-Za-z_,-]", "", "_".join(str(lg or "unknown").split())) or "unknown"
     ch_slug = re.sub(r"[^a-z0-9]+", "-", c.lower()).strip("-") or "unknown"
     today = datetime.date.today().isoformat()
-    out = (f"---\ntitle: \"{t}\"\nurl: {qs(wurl)}\nsource: {qs(wurl)}\nchannel: \"{c}\"\n"
+    out = (f"---\ntitle: {qs(t)}\nurl: {qs(wurl)}\nsource: {qs(wurl)}\nchannel: {qs(c)}\n"
            f"videoId: {vid}\nvideo_id: {vid}\nlanguage: {lg}{' (auto)' if auto else ''}\n"
            f"created: {today}\nwatched: {today}\nstatus: watched\n"
            f"tags: [youtube, youtube/channel/{ch_slug}]\n")
@@ -212,20 +270,26 @@ def _frontmatter(title, wurl, channel, vid, lg, auto, meta=None, obsidian=False)
         out += "aliases: [\"{}\"]\n".format(t)
     if meta:
         if meta.get("method"):
-            out += f"method: {meta['method']}\n"
+            out += f"method: {yq(meta['method'])}\n"
         if meta.get("published"):
-            out += f"published: {meta['published']}\n"
+            out += f"published: {yq(meta['published'])}\n"
         if meta.get("duration") is not None:
             out += f"duration: {qs(_fmt_dur(meta['duration']))}\n"
-            out += f"duration_secs: {meta['duration']}\n"
+            try:
+                out += f"duration_secs: {int(meta['duration'])}\n"
+            except (TypeError, ValueError):
+                out += f"duration_secs: {yq(meta['duration'])}\n"
         if meta.get("views") is not None:
-            out += f"views: {meta['views']}\n"
+            try:
+                out += f"views: {int(meta['views'])}\n"
+            except (TypeError, ValueError):
+                out += f"views: {yq(meta['views'])}\n"
         if meta.get("channel_url"):
             out += f"channelUrl: {qs(meta['channel_url'])}\n"
         if meta.get("thumbnail"):
             out += f"thumbnailUrl: {qs(meta['thumbnail'])}\n"
         if meta.get("description"):
-            out += f"description: \"{clean(meta['description'][:500])}\"\n"
+            out += f"description: {qs(clean(meta['description'][:500]))}\n"
     return out + "---\n\n"
 
 
@@ -249,7 +313,9 @@ def _existing_vid(path):
                 m = re.match(r"video_id:\s*(\S+)", ln)
                 if m:
                     return m.group(1)
-    except OSError:
+    except OSError as e:
+        if getattr(e, "errno", None) == 28:
+            raise
         pass
     return None
 
@@ -266,7 +332,9 @@ def _unique_path(vp, vid, used):
 def _count_lines(path):
     try:
         return sum(1 for ln in open(path, encoding="utf-8") if ln.strip())
-    except OSError:
+    except OSError as e:
+        if getattr(e, "errno", None) == 28:
+            raise
         return 0
 
 
@@ -275,7 +343,9 @@ def _skip_map(skip_log):
     m = {}
     try:
         lines = open(skip_log, encoding="utf-8")
-    except OSError:
+    except OSError as e:
+        if getattr(e, "errno", None) == 28:
+            raise
         return m
     with lines:
         for ln in lines:
@@ -307,9 +377,9 @@ def _write_index(root, videos, completed, words_by_id, reasons):
         else:
             st = "pending"
         rows.append([v.get("title") or vid, st, str(words_by_id.get(vid, "-"))])
-    with open(os.path.join(root, "INDEX.md"), "w", encoding="utf-8") as f:
-        f.write(f"# Index\n\n- Videos: {len(videos)}\n- Done: {len(completed)}\n\n")
-        f.write(table(["Title", "Status", "Words"], rows))
+    _atomic_write(os.path.join(root, "INDEX.md"),
+                  f"# Index\n\n- Videos: {len(videos)}\n- Done: {len(completed)}\n\n"
+                  + table(["Title", "Status", "Words"], rows))
 
 
 COLLECTION_KEYS = ("layout", "lang", "timestamps", "chunk", "chunk_cooldown_min")

@@ -36,6 +36,8 @@ def _flatten(ydl, info, out, limit, depth=0, since_ts=0):
         return
     if len(out) >= limit:
         return
+    if depth >= 3:  # channel -> tabs -> videos is 2 deep; deeper is cycles, never videos
+        return
     entries = info.get("entries")
     if info.get("_type") not in ("playlist", "multi_video", "compat_batch") or not entries:
         vid = info.get("id") or ""
@@ -102,8 +104,9 @@ def _list_load(urls, max_n, since):
         if (age < ttl and isinstance(d.get("videos"), list)
                 and (d.get("complete") or (d.get("max_n", 0) or 0) >= (max_n or 100))):
             return d["videos"][:max_n], d.get("hint")
-    except (OSError, ValueError, TypeError, KeyError, AttributeError):
-        pass
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
+        if getattr(e, "errno", None) == 28:
+            raise
     return None
 
 
@@ -118,8 +121,9 @@ def _list_save(urls, max_n, since, videos, hint, complete):
                    "videos": videos, "hint": hint},
                   open(tmp, "w", encoding="utf-8"))
         os.replace(tmp, p)
-    except (OSError, ValueError, TypeError):
-        pass
+    except (OSError, ValueError, TypeError) as e:
+        if getattr(e, "errno", None) == 28:
+            raise
 
 
 def _channel_id(url, cookies_from_browser=None):
@@ -147,13 +151,20 @@ def _parse_rss_ts(s):
     if not s:
         return 0
     try:
-        return datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+        dt = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:  # bare form: device tz must not shift the epoch
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.timestamp()
     except ValueError:
         pass
     try:
-        return datetime.datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").timestamp()
+        return datetime.datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").replace(
+            tzinfo=datetime.timezone.utc).timestamp()
     except (ValueError, TypeError):
         return 0
+
+
+_RSS_CAP = 1 << 20  # feeds are KBs; never read unbounded
 
 
 def rss_videos(url, since_ts, max_n=100, opener=None, cookies_from_browser=None):
@@ -168,7 +179,7 @@ def rss_videos(url, since_ts, max_n=100, opener=None, cookies_from_browser=None)
         req = _make_req(f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}")
         ctx = opener(req) if opener else urllib.request.urlopen(req, timeout=20)
         with ctx as r:
-            raw = r.read()
+            raw = r.read(_RSS_CAP)
         data = (raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw or ""))
         data = data.lstrip("﻿")
         if not data.strip():
@@ -178,7 +189,7 @@ def rss_videos(url, since_ts, max_n=100, opener=None, cookies_from_browser=None)
         root = ET.fromstring(data)
         title_el = root.find("a:title", ns)
         chan = title_el.text if title_el is not None else ""
-        out = []
+        out, seen = [], 0
         for e in root.findall("a:entry", ns):
             vid = e.find("yt:videoId", ns)
             pub = e.find("a:published", ns)
@@ -188,6 +199,7 @@ def rss_videos(url, since_ts, max_n=100, opener=None, cookies_from_browser=None)
             vid = (vid.text or "").strip()
             if not vid:
                 continue
+            seen += 1
             ts = _parse_rss_ts(pub.text)
             if not ts or ts < since_ts:
                 continue
@@ -196,7 +208,7 @@ def rss_videos(url, since_ts, max_n=100, opener=None, cookies_from_browser=None)
                         "url": f"https://www.youtube.com/watch?v={vid}"})
             if len(out) >= (max_n or 100):
                 break
-        return out
+        return out if seen else None  # [] = feed ok, nothing new; None = fail, fall back
     except Exception:
         return None
 
@@ -258,24 +270,150 @@ def _make_req(url):
         return urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
 
 
+def _open(req, opener, timeout):
+    """Via the yt-dlp opener when present (proxy/cookies), else plain stdlib."""
+    return opener(req) if opener is not None else urllib.request.urlopen(req, timeout=timeout)
+
+
+_VTT_MAX = 5 * 1024 * 1024
+
+
+def _read_capped(resp, cap=_VTT_MAX):
+    return resp.read(cap + 1)[:cap + 1]
+
+
+def _innertube_headers(req, extra):
+    try:
+        req.headers.update(extra)
+    except Exception:
+        try:
+            for k, v in extra.items():
+                req.add_header(k, v)
+        except Exception:
+            pass
+    return req
+
+
+def _xml_secs(el):
+    if el.get("t") is not None:
+        try:
+            return float(el.get("t")) / 1000.0
+        except (TypeError, ValueError):
+            pass
+    if el.get("start") is not None:
+        try:
+            return float(el.get("start"))
+        except (TypeError, ValueError):
+            pass
+    b = (el.get("begin") or "").strip()
+    if b:
+        try:
+            if b.endswith("s"):
+                return float(b[:-1])
+            p = b.split(":")
+            if len(p) == 3:
+                return int(p[0]) * 3600 + int(p[1]) * 60 + float(p[2])
+            return int(p[0]) * 60 + float(p[1])
+        except (ValueError, IndexError, AttributeError):
+            pass
+    return None
+
+
+def _xml_segs(raw):
+    import html as _h
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(raw)
+    out = []
+    for el in root.iter():
+        if not isinstance(el.tag, str):
+            continue
+        if el.tag.rsplit("}", 1)[-1] not in ("p", "text"):
+            continue
+        st = _xml_secs(el)
+        if st is None:
+            continue
+        tx = re.sub(r" {2,}", " ", _h.unescape("".join(el.itertext())).replace(" ", " ").strip())
+        if tx:
+            out.append((float(st), tx))
+    return sorted(out)
+
+
+def innertube_subs(vid, lang="en", opener=None):
+    """Innertube ANDROID player -> captionTracks -> timedtext (vtt>srv3>ttml). [] on any error."""
+    try:
+        lang = (lang or "en").strip() or "en"
+        if not re.fullmatch(r"[\w-]{11}", vid or ""):
+            return []
+        body = json.dumps({"videoId": vid, "context": {"client": {
+            "clientName": "ANDROID", "clientVersion": "20.10.38", "hl": lang, "gl": "US"}}}).encode()
+        url = "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+        req = urllib.request.Request(url, data=body, headers={
+            "User-Agent": "Mozilla/5.0", "Content-Type": "application/json",
+            "X-YouTube-Client-Name": "ANDROID",
+            "X-YouTube-Client-Version": "20.10.38"})
+        ctx = _open(req, opener, 20)
+        with ctx as r:
+            player = json.loads(_read_capped(r).decode("utf-8", errors="ignore"))
+        tracks = (player.get("captions") or {}).get(
+            "playerCaptionsTracklistRenderer", {}).get("captionTracks") or []
+        tracks = [t for t in tracks if isinstance(t, dict) and t.get("baseUrl")]
+        if not tracks:
+            return []
+        base_lg = lang.split("-")[0].split("_")[0]
+        track = next((t for t in tracks if t.get("languageCode") == lang), None)
+        if track is None:
+            track = next((t for t in tracks
+                          if (t.get("languageCode") or "").split("-")[0].split("_")[0] == base_lg), None)
+        track = track or tracks[0]
+        base = track["baseUrl"]
+        from .vtt import vtt_segments
+        for fmt in ("vtt", "srv3", "ttml"):
+            try:
+                u = re.sub(r"([?&])fmt=[^&]*", rf"\1fmt={fmt}", base) if "fmt=" in base \
+                    else base + ("&" if "?" in base else "?") + f"fmt={fmt}"
+                with _open(_make_req(u), opener, 20) as r2:
+                    raw = _read_capped(r2).decode("utf-8", errors="ignore")
+                if not raw or not raw.strip():
+                    continue
+                segs = vtt_segments(raw) if fmt == "vtt" else _xml_segs(raw)
+                if segs:
+                    return segs
+            except Exception as e:
+                if getattr(e, "errno", None) == 28:
+                    raise
+                continue
+        return []
+    except Exception as e:
+        if getattr(e, "errno", None) == 28:
+            raise
+        return []
+
+
 def sponsor_ranges(vid, cats=("sponsor",), opener=None):
     """SponsorBlock skip ranges [(start, end)]; fail-open [] on any error."""
     try:
+        if not re.fullmatch(r"[\w-]{11}", vid or ""):
+            return []
         import urllib.parse
-        q = urllib.parse.quote(json.dumps(list(cats)))
+        cats = [c.strip() for c in (cats or ("sponsor",)) if (c or "").strip()]
+        q = urllib.parse.quote(",".join(cats or ["sponsor"]))
         req = _make_req(f"https://sponsor.ajay.app/api/skipSegments?videoID={vid}&categories={q}")
-        ctx = opener(req) if opener else urllib.request.urlopen(req, timeout=10)
-        with ctx as r:
+        with _open(req, opener, 10) as r:
             data = json.loads(r.read().decode("utf-8", errors="ignore"))
         out = []
         for d in data or []:
             try:
                 seg = d.get("segment") if isinstance(d, dict) else d
-                out.append((float(seg[0]), float(seg[1])))
+                s, e = float(seg[0]), float(seg[1])
+                if e <= s:
+                    continue
+                out.append((s, e))
             except (TypeError, ValueError, IndexError, AttributeError):
                 continue
         return out
-    except Exception:
+    except Exception as e:
+        if getattr(e, "errno", None) == 28:
+            raise
         return []
 
 
@@ -286,35 +424,43 @@ def strip_sponsored(segs, ranges):
             if not any(s <= st < e for s, e in ranges)]
 
 
-def fetch_vtt(formats, opener=None):
+def fetch_vtt(formats, opener=None, bucket=None):
     """Try each format in order (vtt first). One dead mirror must not kill the video."""
     want = [f for f in (formats or []) if isinstance(f, dict) and f.get("url")] or []
     if not want and formats:
         want = [f for f in formats if isinstance(f, dict) and f.get("url")]
     want = [f for f in want if f.get("ext") == "vtt"] or want
     last = None
-    for f in want:
+    for i, f in enumerate(want):
         try:
-            req = _make_req(f["url"])
-            if opener is None:  # plain stdlib (tests, offline use)
-                ctx = urllib.request.urlopen(req, timeout=20)
-            else:  # yt-dlp handler: proxy, cookies, impersonation aware
-                ctx = opener(req)
-            with ctx as r:
-                return r.read().decode("utf-8", errors="ignore")
+            if bucket is not None and i:  # pace mirrors, not the first try
+                bucket.wait()
+            with _open(_make_req(f["url"]), opener, 20) as r:
+                return _read_capped(r).decode("utf-8", errors="ignore")
         except Exception as e:
             last = e
+            try:  # honor Retry-After before the next mirror
+                from .throttle import _is_throttle, _retry_after_hint
+                if _is_throttle(e):
+                    time.sleep(_retry_after_hint(e, 2, cap=120))
+            except Exception:
+                pass
             continue
     raise last if last is not None else RuntimeError("no subtitle formats")
 
 
-def detect_langs(videos, probe=3, want=("tr", "en")):
+_PROBE_CAP = 5  # sampling more videos rarely changes the suggestion, always costs extract_info
+
+
+def detect_langs(videos, probe=3, want=("tr", "en"), ydl_opts=None):
     """Sample the first few videos for ORIGINAL subtitle languages: (suggestion, found).
     tlang translations are ignored (most 429-prone kind)."""
     direct, anykey = {}, {}
-    with YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True,
-                    "socket_timeout": 20}) as ydl:
-        for v in videos[:probe]:
+    n = max(0, min(probe if probe else _PROBE_CAP, _PROBE_CAP))  # caller hint, capped
+    opts = dict(ydl_opts) if ydl_opts else {"quiet": True, "no_warnings": True, "skip_download": True,
+                                            "socket_timeout": 20}
+    with YoutubeDL(opts) as ydl:
+        for v in (videos or [])[:n]:
             try:
                 info = ydl.extract_info(v["url"], download=False)
             except Exception:
@@ -343,28 +489,45 @@ def _cache_path(vid, lg, auto=False):
     return os.path.join(base, "tube2note", "subs", f"{vid}.{lg}.{kind}.vtt")
 
 
+_VTT_CAP = 2 * 1024 * 1024  # giant payloads are error pages, never worth caching
+
+
 def _get_vtt(vid, lg, auto, fmts, opener, fetch_gap=10):
     """Shared subtitle cache: same video is never downloaded twice (429-friendly).
     The key includes the track kind so a later manual upload replaces stale auto text."""
+    from .vtt import vtt_segments as _segs
     p = _cache_path(vid, lg, auto)
     if os.path.exists(p):
         try:
-            cached = open(p, encoding="utf-8").read()
-            if "-->" in cached:
-                return cached, True
-            os.unlink(p)  # poisoned cache (error page, not captions): refetch
-        except (OSError, ValueError):
-            pass
+            if os.path.getsize(p) > _VTT_CAP:
+                os.unlink(p)  # huge: never a real transcript, refetch
+            else:
+                cached = open(p, encoding="utf-8").read()
+                try:
+                    ok = bool(_segs(cached))
+                except Exception:
+                    ok = "-->" in cached
+                if ok:
+                    return cached, True
+                os.unlink(p)  # poisoned cache (error page, not captions): refetch
+        except (OSError, ValueError) as e:
+            if getattr(e, "errno", None) == 28:
+                raise
     if fetch_gap > 0:
         time.sleep(random.uniform(1, max(1, fetch_gap)))  # pace timedtext fetches only
     vtt = fetch_vtt(fmts, opener)
-    if "-->" not in vtt:
-        return vtt, False  # not captions: don't cache poison, caller skips the video
+    try:
+        valid = bool(_segs(vtt))
+    except Exception:
+        valid = "-->" in (vtt or "")
+    if not valid or len(vtt or "") > _VTT_CAP:
+        return vtt, False  # not captions (or huge): don't cache poison, caller skips the video
     try:
         os.makedirs(os.path.dirname(p), exist_ok=True)
         tmp = p + ".tmp"
         open(tmp, "w", encoding="utf-8").write(vtt)
         os.replace(tmp, p)
-    except OSError:
-        pass
+    except OSError as e:
+        if getattr(e, "errno", None) == 28:
+            raise
     return vtt, False

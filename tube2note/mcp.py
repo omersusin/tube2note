@@ -6,10 +6,17 @@ Pair with any MCP client:
 import contextlib
 import io
 import json
+import re
 import sys
 
 from . import __version__
 from .naming import sanitize_filename
+
+URL_RE = re.compile(r"^https?://(www\.|m\.|music\.)?(youtube\.com|youtu\.be)/\S+$", re.IGNORECASE)
+
+
+def _ok_url(u):
+    return bool(URL_RE.match(str(u or "").strip()))
 
 TOOLS = [
     {"name": "download",
@@ -33,9 +40,22 @@ TOOLS = [
                           "sponsorblock": {"type": "boolean", "description": "skip sponsor segments"},
                           "cite": {"type": "boolean", "description": "add citations"},
                           "transcribe": {"type": "boolean", "description": "transcribe captionless videos, needs GEMINI_API_KEY"},
-                          "engine": {"type": "string", "enum": ["api", "local"], "description": "transcribe engine"},
-                          "gemini_model": {"type": "string", "description": "Gemini model override"},
-                          "epub": {"type": "boolean", "description": "write EPUB next to the Markdown"},
+                           "engine": {"type": "string", "enum": ["api", "local"], "description": "transcribe engine"},
+                           "gemini_model": {"type": "string", "description": "Gemini model override"},
+                           "whisper_model": {"type": "string", "enum": ["tiny", "base"], "description": "whisper.cpp model for --engine local"},
+                           "fast_subs": {"type": "boolean", "description": "subs-only: skip audio download/transcribe"},
+                           "diarize": {"type": "boolean", "description": "prefix lines with SPEAKER_XX"},
+                           "timestamps": {"type": "boolean", "description": "keep [MM:SS] markers"},
+                           "txt": {"type": "boolean", "description": "write .txt sidecar per video"},
+                           "jsonl": {"type": "boolean", "description": "append one JSON line per video"},
+                           "pdf": {"type": "boolean", "description": "write PDF next to the Markdown"},
+                           "proxy": {"type": "string", "description": "proxy URL (yt-dlp syntax)"},
+                           "cookies": {"type": "string", "description": "Netscape cookies.txt file"},
+                           "workers": {"type": "integer", "description": "parallel fetch workers 1-4"},
+                           "since": {"type": "string", "description": "only videos on/after YYYY-MM-DD"},
+                           "template": {"type": "string", "description": "per-video path template"},
+                           "clean_level": {"type": "string", "enum": ["light", "full"], "description": "cleaning strength"},
+                           "epub": {"type": "boolean", "description": "write EPUB next to the Markdown"},
                           "obsidian": {"type": "boolean", "description": "Obsidian tags+aliases"},
                           "cookies_from_browser": {"type": "string", "description": "e.g. chrome"}},
                      "required": ["url"]}},
@@ -73,8 +93,19 @@ def _call(name, args):
     if name == "download":
         if not args.get("url"):
             raise ValueError("missing required param: url")
+        if not _ok_url(args.get("url")):
+            raise ValueError(f"Not a YouTube URL: {str(args.get('url'))[:60]}")
         if args.get("out") is not None and not isinstance(args.get("out"), str):
             raise ValueError("out must be a string")
+        eng = args.get("engine") or "api"
+        if eng not in ("api", "local"):
+            raise ValueError("Unknown engine")
+        wm = args.get("whisper_model") or "tiny"
+        if wm not in ("tiny", "base"):
+            raise ValueError("Unknown whisper model")
+        cl = args.get("clean_level") or "full"
+        if cl not in ("light", "full"):
+            raise ValueError("Unknown clean level")
         from .config import resolve_config
         from .job import _exit_code, run_job
         from .llm import _GEMINI_MODEL
@@ -95,9 +126,21 @@ def _call(name, args):
                           srt=bool(args.get("srt")), epub=bool(args.get("epub")),
                           obsidian=bool(args.get("obsidian")),
                           cookies_from_browser=args.get("cookies_from_browser"),
+                          cookiefile=args.get("cookies"),
+                          proxy=args.get("proxy"),
+                          since=args.get("since"),
+                          template=args.get("template"),
+                          clean_level=cl,
+                          ts=bool(args.get("timestamps")),
+                          txt=bool(args.get("txt")), jsonl=bool(args.get("jsonl")),
+                          pdf=bool(args.get("pdf")),
+                          workers=_coerce_int(args.get("workers"), 1, "workers"),
                           transcribe=bool(args.get("transcribe")),
-                          engine=args.get("engine") or "api",
+                          engine=eng,
                           gemini_model=args.get("gemini_model") or _GEMINI_MODEL,
+                          whisper_model=wm,
+                          diarize=bool(args.get("diarize")),
+                          fast_subs=bool(args.get("fast_subs")),
                           vtt=bool(args.get("vtt")), anki=bool(args.get("anki")),
                           chapters=bool(args.get("chapters")),
                           sponsorblock=bool(args.get("sponsorblock")),
@@ -113,6 +156,8 @@ def _call(name, args):
     if name == "dry_run":
         if not args.get("url"):
             raise ValueError("missing required param: url")
+        if not _ok_url(args.get("url")):
+            raise ValueError(f"Not a YouTube URL: {str(args.get('url'))[:60]}")
         from .source import detect_langs, expand
         with contextlib.redirect_stdout(io.StringIO()):
             videos, hint = expand([args["url"]], _coerce_int(args.get("max"), 100, "max"))

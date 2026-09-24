@@ -84,8 +84,8 @@ def cmd_setup(advanced=False):
     return cfg
 
 
-def tui():
-    prof = os.environ.get("YT2MD_PROFILE") or None
+def tui(profile=None):
+    prof = profile or os.environ.get("YT2MD_PROFILE") or None
     cfg = resolve_config(profile=prof)
     show_intro()
     if is_first_run():
@@ -136,9 +136,12 @@ def tui():
         lastdir = os.environ.get("YT2MD_OUTDIR") or load_config().get("lastdir") or cfg["outdir"]
         if input("Advanced options? [n] > ").strip().lower() not in ("y", "yes"):
             outdir, lay, ch, chc = lastdir, cfg["layout"], cfg["chunk"], cfg["chunk_cooldown_min"] * 60
-            ts, lk, sr, tr, sm, tl, bi = cfg["timestamps"], False, False, None, False, None, None
+            ts, lk, sr = cfg["timestamps"], cfg.get("link_timestamps", False), cfg.get("srt", False)
+            tr, sm, tl, bi = None, False, None, None
             cl, pdf, ep, tmp, wk, sp = cfg["clean"], False, False, cfg["template"], 1, 0
-            chap, cit, vv, sb = False, False, False, False
+            chap, cit, vv, sb = cfg["chapters"], cfg["cite"], cfg["vtt"], cfg["sponsorblock"]
+            tx, ak = cfg.get("txt", False), cfg["anki"]
+            dz, fs, wm = cfg["diarize"], cfg["fast_subs"], cfg["whisper_model"]
         else:
             outdir = input(f"Folder [{lastdir}] > ").strip() or lastdir
             try:
@@ -197,6 +200,8 @@ def tui():
                 sp = max(0, int(sp))
             except ValueError:
                 sp = 0
+            tx, ak = cfg.get("txt", False), cfg["anki"]
+            dz, fs, wm = cfg["diarize"], cfg["fast_subs"], cfg["whisper_model"]
         print(f"\n{len(videos)} videos, output: {outdir}/{out}, langs: {lang}, layout: {lay}, "
               f"chunk: {ch}/{chc // 60}min, timestamps: {ts}, template: {tmp or 'default'}, split: {sp or 'off'}")
         go = input("[Enter]=start, q=cancel > ").strip()
@@ -206,10 +211,11 @@ def tui():
             run_job(urls, out, lang, max_n, 2.0, False, ch, chc, 1800, videos, outdir, ts, sp,
                     layout=lay, template=tmp, pdf=pdf, epub=ep, since=since, profile=prof, workers=wk,
                     clean=cl, clean_level=cfg["clean_level"],
-                    link_timestamps=lk, srt=sr, vtt=vv,
+                    link_timestamps=lk, srt=sr, vtt=vv, txt=tx, anki=ak,
                     chapters=chap, sponsorblock=sb, cite=cit,
                     transcribe=tr is not None, engine=tr or "api",
-                    summarize=sm, translate=tl, bilingual=bi)
+                    summarize=sm, translate=tl, bilingual=bi,
+                    diarize=dz, fast_subs=fs, whisper_model=wm)
         except KeyboardInterrupt:
             print("\nCancelled.")
         again = input("\nNew job? [Enter]=yes, q=quit > ").strip()

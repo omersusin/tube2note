@@ -8,7 +8,7 @@ import shutil
 import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from yt_dlp import YoutubeDL
 
@@ -27,20 +27,22 @@ from .llm import (
 from .naming import DEFAULT_TEMPLATES, render_template
 from .output import (
     _collection_override,
+    _count_words_file,
     _existing_vid,
     _frontmatter,
     _unique_path,
     _video_meta,
+    _wcount,
     _write_index,
     split_output,
 )
 from .pdf import md_to_pdf
-from .source import _get_vtt, _parse_since, expand, pick_sub
+from .source import _get_vtt, _parse_since, expand, innertube_subs, pick_sub
 from .store import VID_RE, Store
 from .throttle import Bucket, _countdown, _is_throttle, _retry_after_hint
 from .ui import dash_end, dash_update, dim, green, log, panel, red, set_verbose
 from .vtt import _join_paras, vtt_segments
-from .whisper import whisper_segments
+from .whisper import diarize_segs, whisper_segments
 
 _BIB_ROWS = []
 _RIS_ROWS = []
@@ -69,6 +71,50 @@ def _vtt_text(segs):
     return segs_to_vtt(triples)
 
 
+def _diarized(segs):
+    """[(start, text)] -> [(start, 'SPEAKER_XX: text')]. Fail-open."""
+    try:
+        return [(st, f"{sp}: {tx}") for st, tx, sp in diarize_segs(segs)]
+    except Exception:
+        return segs
+
+
+def _innertube_ok(v, langs, ts, res, clean, clean_level, summarize, gemini_model,
+                  translate, bilingual, chapters, diarize):
+    """--- innertube-try (this agent; sibling owns transcribe/diarize/fast-subs) ---
+    Best-effort Innertube captions -> completed res, or None. Never raises."""
+    try:
+        segs = innertube_subs(v["id"], langs[0] if langs else "en") or []
+    except Exception:
+        return None
+    if not segs:
+        return None
+    try:
+        if diarize:
+            segs = _diarized(segs)
+        ch = (res.get("chapters") or None) if chapters else None
+        text = _join_paras(segs, ts, ch, vid=v["id"], link_chapters=True).strip()
+        if clean:
+            text = _clean_text(text, langs[0] if langs else "en", clean_level)
+        res.update(lg=langs[0] if langs else "en", auto=False, text=text,
+                   segs=segs, stage="ok")
+        if summarize and _wcount(text) > 100:
+            try:
+                res["summary"] = _gemini_summarize(text, res["lg"], gemini_model)
+            except Exception as e:
+                res["summary_error"] = str(e) or type(e).__name__
+        tgt = bilingual or translate
+        if tgt and _wcount(text) > 20:
+            try:
+                res["translation"] = _translate_chunks(text, tgt, gemini_model)
+            except Exception as e:
+                res["translation_error"] = str(e) or type(e).__name__
+        res["bilingual"] = bool(bilingual)
+        return res
+    except Exception:
+        return None
+
+
 def _exit_code(result):
     """0 = all videos ok, 1 = partial/none (cron-friendly), 2 = fatal (raised)."""
     if not result or result.get("total", 0) == 0:
@@ -81,7 +127,7 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                 gemini_model=_GEMINI_MODEL,
                 engine="api", translate=None, bilingual=None, proxy=None, cookiefile=None,
                 vtt=False, anki=False, chapters=False, sponsorblock=False, cite=False,
-                whisper_model="tiny", auto_yes=False):
+                whisper_model="tiny", auto_yes=False, diarize=False, fast_subs=False):
     """One video, network only, never raises (except disk-full).
     Returns dict with stage: extract|subs|fetch|ok."""
     res = {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
@@ -111,7 +157,13 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                 except Exception:
                     pass
             if not fmts:
-                if transcribe:
+                # --- innertube-try before transcribe/skip (this agent) ---
+                _hit = _innertube_ok(v, langs, ts, res, clean, clean_level, summarize,
+                                     gemini_model, translate, bilingual, chapters, diarize)
+                if _hit is not None:
+                    return _hit
+                # --- end innertube-try; transcribe/skip below is sibling scope ---
+                if transcribe and not fast_subs:
                     lang0 = langs[0] if langs else "en"
                     ttext, tsegs, note = None, [], ""
                     if engine == "local":
@@ -162,18 +214,21 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                                 res["segs_skipped"] = _nd
                             except Exception:
                                 res["segs_skipped"] = 0
+                        if diarize and tsegs:
+                            tsegs = _diarized(tsegs)
+                            ttext = "\n".join(tx for _, tx in tsegs)
                         res.update(lg=langs[0] if langs else "en", auto=False, text=ttext,
                                    trans=True, stage="ok")
                         if tsegs:
                             res["segs"] = tsegs
                         res["meta"]["method"] = "gemini-transcribe" if engine != "local" else f"local-transcribe-{whisper_model}"
-                        if summarize and len(ttext.split()) > 100:
+                        if summarize and _wcount(ttext) > 100:
                             try:
                                 res["summary"] = _gemini_summarize(ttext, res["lg"], gemini_model)
                             except Exception as e:
                                 res["summary_error"] = str(e) or type(e).__name__
                         tgt = bilingual or translate
-                        if tgt and len(ttext.split()) > 20:
+                        if tgt and _wcount(ttext) > 20:
                             try:
                                 res["translation"] = _translate_chunks(ttext, tgt,
                                                                        gemini_model)
@@ -193,6 +248,13 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                     vtt_raw, was_cached = _get_vtt(v["id"], lg, auto, fmts, ydl.urlopen,
                                           0 if bucket is not None else fetch_gap)
                     segs = vtt_segments(vtt_raw)
+                    if not segs:
+                        try:
+                            segs = innertube_subs(v["id"], lg) or []
+                        except Exception:
+                            segs = []
+                    if diarize and segs:
+                        segs = _diarized(segs)
                     if sponsorblock:
                         try:
                             from .source import sponsor_ranges, strip_sponsored
@@ -213,13 +275,13 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                                               link_chapters=True).strip()
                     if clean:
                         res["text"] = _clean_text(res["text"], lg, clean_level)
-                    if summarize and len(res["text"].split()) > 100:
+                    if summarize and _wcount(res["text"]) > 100:
                         try:
                             res["summary"] = _gemini_summarize(res["text"], lg, gemini_model)
                         except Exception as e:
                             res["summary_error"] = str(e) or type(e).__name__
                     tgt = bilingual or translate
-                    if tgt and len(res["text"].split()) > 20:
+                    if tgt and _wcount(res["text"]) > 20:
                         try:
                             res["translation"] = _translate_chunks(res["text"], tgt,
                                                                   gemini_model)
@@ -230,6 +292,12 @@ def _fetch_unit(ydl_opts, v, langs, ts, bucket, fetch_gap, clean=True,
                     res["stage"] = "ok"
                     return res
                 except Exception as e:
+                    # --- innertube-try in fetch except (this agent) ---
+                    _hit2 = _innertube_ok(v, langs, ts, res, clean, clean_level, summarize,
+                                          gemini_model, translate, bilingual, chapters, diarize)
+                    if _hit2 is not None:
+                        return _hit2
+                    # --- end innertube-try ---
                     last = e
                     if getattr(e, "errno", None) == 28:
                         raise
@@ -254,7 +322,8 @@ def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
             clean_level="full", transcribe=False, tmpdir=None, summarize=False,
             gemini_model=_GEMINI_MODEL, engine="api", translate=None, bilingual=None,
             proxy=None, cookiefile=None, vtt=False, anki=False, chapters=False,
-            sponsorblock=False, cite=False, whisper_model="tiny", auto_yes=False):
+            sponsorblock=False, cite=False, whisper_model="tiny", auto_yes=False,
+            diarize=False, fast_subs=False):
     """Yield (i, v, res) in submission order; purely serial when workers<=1.
     Parallel submits in small batches so a cooldown stops new work quickly."""
     if workers <= 1:
@@ -263,7 +332,7 @@ def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
                                     clean_level, transcribe, tmpdir, summarize, gemini_model,
                                     engine, translate, bilingual, proxy, cookiefile,
                                     vtt, anki, chapters, sponsorblock, cite,
-                                    whisper_model, auto_yes)
+                                    whisper_model, auto_yes, diarize, fast_subs)
         return
     with ThreadPoolExecutor(max_workers=workers) as ex:
         it = iter(work)
@@ -275,18 +344,24 @@ def _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap, clean=True,
                                      clean, clean_level, transcribe, tmpdir, summarize,
                                      gemini_model, engine, translate, bilingual, proxy,
                                      cookiefile, vtt, anki, chapters, sponsorblock, cite,
-                                     whisper_model, auto_yes)) for i, v in batch]
-            for i, v, fu in futs:
+                                     whisper_model, auto_yes, diarize, fast_subs)) for i, v in batch]
+            buf = {}
+            for fu in as_completed([f for _, _, f in futs]):
+                for i, v, f in futs:
+                    if f is fu:
+                        break
                 try:
-                    yield i, v, fu.result()
+                    buf[i] = (v, fu.result())
                 except Exception as e:
                     if getattr(e, "errno", None) == 28:
                         raise
-                    yield i, v, {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
-                                 "channel": v.get("channel"), "lg": None, "auto": False,
-                                 "text": None, "error": str(e) or type(e).__name__,
-                                 "throttled": _is_throttle(e), "hint": e, "stage": "extract",
-                                 "chapters": [], "meta": {}}
+                    buf[i] = (v, {"v": v, "title": v.get("title") or v["id"], "wurl": v.get("url"),
+                                  "channel": v.get("channel"), "lg": None, "auto": False,
+                                  "text": None, "error": str(e) or type(e).__name__,
+                                  "throttled": _is_throttle(e), "hint": e, "stage": "extract",
+                                  "chapters": [], "meta": {}})
+            for i, v, _ in futs:
+                yield i, *buf[i]
 
 
 class _Skip(Exception):
@@ -297,9 +372,15 @@ class _Skip(Exception):
         self.title, self.url, self.reason, self.throttled = title, url, reason, throttled
 
 
-def _fail(st, todo, words, t0, verbose, throttle_cooldown, hint, sk, status):
+def _fail(st, todo, words, t0, verbose, throttle_cooldown, hint, sk, status, store=None):
     """Record a skip, bump the 5-strike throttle counter, cool down if struck out."""
     st["skip"].append((sk.title, sk.url, sk.reason))
+    if store is not None:
+        try:
+            vid = (VID_RE.search(sk.url or "") or [None, sk.url])[1]
+            store.mark_skip(vid or sk.url, sk.title, sk.url, sk.reason)
+        except Exception:
+            pass
     st["consec"] = st["consec"] + 1 if sk.throttled else 0
     st["status"] = "throttled" if sk.throttled else status
     if st["consec"] >= 5:
@@ -307,7 +388,7 @@ def _fail(st, todo, words, t0, verbose, throttle_cooldown, hint, sk, status):
             log("  ! 5 throttles in a row -> long cooldown")
         _countdown(_retry_after_hint(hint, throttle_cooldown),
                    "throttle cooldown", lambda left: dash_update(
-            st["ok"] + len(st["skip"]), todo, sk.title, st["ok"], len(st["skip"]), words, t0,
+            st.get("base", 0) + st["ok"] + len(st["skip"]), todo, sk.title, st["ok"], len(st["skip"]), words, t0,
             status=f"throttle cooldown {left // 60:02d}:{left % 60:02d} left"))
         st["consec"], st["status"] = 0, ""
 
@@ -319,7 +400,7 @@ def _chunk_pause(st, todo, title, words, t0, verbose, chunk, chunk_cooldown):
     if verbose:
         log(f"--- CHUNK done, {chunk_cooldown // 60} min break ---")
     _countdown(chunk_cooldown, "chunk break", lambda left: dash_update(
-        st["ok"] + len(st["skip"]), todo, title, st["ok"], len(st["skip"]), words, t0,
+        st.get("base", 0) + st["ok"] + len(st["skip"]), todo, title, st["ok"], len(st["skip"]), words, t0,
         status=f"chunk break {left // 60:02d}:{left % 60:02d} left"))
     st["status"] = ""
     st["since_break"] = 0
@@ -392,7 +473,7 @@ def _write_video(fout, jfh, i, v, title, wurl, lg, auto, text, plain, res, extra
     thumb = meta.get("thumbnail") or ""
     chan = v.get("channel") or res.get("channel") or ""
     cite_block = ""
-    if cite:
+    if cite and not to_stdout:
         try:
             from .cite import citation_block, cite_data, to_bibtex, to_ris
             cdata = res.get("cite")
@@ -403,10 +484,23 @@ def _write_video(fout, jfh, i, v, title, wurl, lg, auto, text, plain, res, extra
                 res["cite"] = cdata
             cite_block = citation_block(cdata)
             try:
-                _BIB_ROWS.append(to_bibtex(cdata, key=vid))
-                _RIS_ROWS.append(to_ris(cdata))
-            except Exception:
-                pass
+                _b = to_bibtex(cdata, key=vid)
+                _r = to_ris(cdata)
+                _BIB_ROWS.append(_b)
+                _RIS_ROWS.append(_r)
+                try:
+                    _base = os.path.splitext(out)[0] if out and out != "-" else None
+                    if _base:
+                        with open(_base + ".bib", "a", encoding="utf-8") as _bf:
+                            _bf.write(_b + "\n\n")
+                        with open(_base + ".ris", "a", encoding="utf-8") as _rf:
+                            _rf.write(_r + "\n")
+                except OSError as e:
+                    if getattr(e, "errno", None) == 28:
+                        raise
+            except Exception as e:
+                if getattr(e, "errno", None) == 28:
+                    raise
         except Exception:
             cite_block = ""
     wrap = not single_line and not to_stdout
@@ -423,15 +517,15 @@ def _write_video(fout, jfh, i, v, title, wurl, lg, auto, text, plain, res, extra
         fout.write(f"\n## Citation\n\n{cite_block}\n")
     fout.write("\n---\n\n")
     fout.flush()
+    nwords = _wcount(text)
     if store is not None:
-        store.mark_done(v["id"], title, wurl, len(text.split()))
+        store.mark_done(v["id"], title, wurl, nwords)
     if jfh is not None:
         row = {"video_id": v["id"], "title": title, "url": wurl,
                "channel": v.get("channel") or res.get("channel") or "",
-               "lang": lg, "text": plain, "words": len(plain.split())}
+               "lang": lg, "text": plain, "words": _wcount(plain)}
         jfh.write(json.dumps(row, ensure_ascii=False) + "\n")
         jfh.flush()
-    nwords = len(text.split())
     if layout != "single":
         fields = {"channel": v.get("channel") or res.get("channel") or "channel",
                   "title": title or v["id"], "id": v["id"],
@@ -555,21 +649,7 @@ def _finalize(out, root, layout, videos, completed, words_by_id, store,
     """File mode only: INDEX, skip reconcile, Skipped tail, panels, split/pdf/epub.
     Returns the result dict. Closes the store."""
     try:
-        _bib_mode = "w" if fresh_start else "a"
-        if _BIB_ROWS:
-            try:
-                _bib_p = os.path.splitext(out)[0] + ".bib"
-                with open(_bib_p, _bib_mode, encoding="utf-8") as _bf:
-                    _bf.write("\n\n".join(_BIB_ROWS) + "\n")
-            except OSError:
-                pass
-        if _RIS_ROWS:
-            try:
-                _ris_p = os.path.splitext(out)[0] + ".ris"
-                with open(_ris_p, _bib_mode, encoding="utf-8") as _rf2:
-                    _rf2.write("\n".join(_RIS_ROWS) + ("\n" if _RIS_ROWS else ""))
-            except OSError:
-                pass
+        # bib/ris already appended per-video in _write_video (no loss on interrupt)
         if layout != "single":
             _write_index(root, videos, completed, words_by_id, store.skip_reasons())
             print(f"index: {os.path.join(root, 'INDEX.md')}", flush=True)
@@ -584,16 +664,18 @@ def _finalize(out, root, layout, videos, completed, words_by_id, store,
                     with open(out, "rb") as _f:
                         _f.seek(max(0, os.path.getsize(out) - 5000))
                         tail_done = b"## Skipped" in _f.read()
-                except OSError:
-                    pass
+                except OSError as e:
+                    if getattr(e, "errno", None) == 28:
+                        raise
                 if not tail_done:
                     try:
                         with open(out, "a", encoding="utf-8") as f:
                             f.write("\n## Skipped\n\n")
                             for vid, title, url, reason in store.skips():
                                 f.write(f"- [{title or '?'}]({url or ''}) — {reason}\n")
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        if getattr(e, "errno", None) == 28:
+                            raise
             dash_end()
             _done = [f"{green(str(ndone))} videos -> {out} ({nskip} skipped)",
                      f"~{st['words']} words this run"]
@@ -608,8 +690,7 @@ def _finalize(out, root, layout, videos, completed, words_by_id, store,
                     _done.append(f"{_pat[1:]}: {_p}")
             print(panel("Done", _done))
             if split_words > 0:
-                with open(out, encoding="utf-8") as _rf:
-                    total_words = len(_rf.read().split())
+                total_words = _count_words_file(out)
                 if total_words > split_words:
                     parts = split_output(out, split_words)
                     if len(parts) > 1:
@@ -648,7 +729,7 @@ def _finalize(out, root, layout, videos, completed, words_by_id, store,
         else:
             dash_end()
             print(f"Checkpoint: {st['ok']} videos, {st['words']} words -> {out} (total: {ndone}/{len(videos)})")
-        return {"ok": st["ok"], "skipped": nskip, "total": len(videos)}
+        return {"ok": st["ok"], "skipped": len(st["skip"]), "total": len(videos)}
     finally:
         try:
             store.close()
@@ -676,19 +757,41 @@ def _open_collection(out, fresh, to_stdout, jsonl, total, langs, layout, chunk, 
             _say(f"resuming: {len(done)} videos already done", flush=True)
     else:
         done = set()
-    fresh_start = fresh or (not to_stdout and not os.path.exists(out))
-    mode = "w" if fresh_start else "a"
+    fresh_start = bool(fresh)
+    mode = "w" if (fresh_start or to_stdout or not os.path.exists(out)) else "a"
+    if mode == "a" and not to_stdout:
+        try:
+            if os.path.exists(out):
+                with open(out, encoding="utf-8", errors="replace") as _rf:
+                    _raw = _rf.read()
+                if "\n## Skipped\n" in _raw:
+                    _head = _raw.rsplit("\n## Skipped\n", 1)[0].rstrip() + "\n\n"
+                    with open(out, "w", encoding="utf-8") as _wf:
+                        _wf.write(_head)
+        except OSError as e:
+            if getattr(e, "errno", None) == 28:
+                raise
+    if mode == "w" and not to_stdout:
+        for _ext in (".bib", ".ris"):
+            try:
+                _p = os.path.splitext(out)[0] + _ext
+                if os.path.exists(_p):
+                    os.remove(_p)
+            except OSError as e:
+                if getattr(e, "errno", None) == 28:
+                    raise
     fout = None
     jfh = None
     try:
         fout = sys.stdout if to_stdout else open(out, mode, encoding="utf-8")  # never closed (see finally)
         if jsonl and not to_stdout:
             jpath = out + ".jsonl"
-            if fresh_start:
+            if mode == "w":
                 try:
                     os.remove(jpath)
-                except OSError:
-                    pass
+                except OSError as e:
+                    if getattr(e, "errno", None) == 28:
+                        raise
             elif done and not os.path.exists(jpath):
                 _say("warning: .jsonl missing but videos already done — rows incomplete, use --fresh",
                       file=sys.stderr, flush=True)
@@ -721,7 +824,7 @@ def _open_collection(out, fresh, to_stdout, jsonl, total, langs, layout, chunk, 
          flush=True)
     return {"store": store, "fout": fout, "jfh": jfh, "done": done,
             "completed": set(done),
-            "words_by_id": {} if (fresh_start or to_stdout) else store.words_map(),
+            "words_by_id": {} if (mode == "w" or to_stdout) else store.words_map(),
             "todo": todo, "fresh_start": fresh_start, "mode": mode}
 
 
@@ -734,7 +837,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             link_timestamps=False, srt=False, epub=False, dedupe=True, obsidian=False,
             ts_every=0, single_line=False, txt=False,
             cookies_from_browser=None, jsonl=False, vtt=False, anki=False,
-            chapters=False, sponsorblock=False, cite=False, whisper_model="tiny"):
+            chapters=False, sponsorblock=False, cite=False, whisper_model="tiny",
+            diarize=False, fast_subs=False):
     to_stdout = (out == "-")
     try:
         _BIB_ROWS.clear()
@@ -749,6 +853,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         set_verbose(False)
         verbose = False
         layout = "single"
+        cite = False
         try:
             sys.stdout.reconfigure(errors="replace")
         except Exception:
@@ -797,17 +902,19 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
     ts = ts or link_timestamps  # links need markers; never silently produce unlinkable text
     langs = [s.strip() for s in lang_str.split(",") if s.strip()]
     total = len(videos)
+    if transcribe and not fast_subs and diarize and engine == "api":
+        _say("warning: --diarize with --engine api has no timings for transcribed videos — only subtitled videos will be labeled", flush=True)
     def _unpipe():
         try:
             from .ui import set_pipe as _sp
             _sp(False)
         except Exception:
             pass
-    if transcribe and not os.environ.get("GEMINI_API_KEY", "") and engine != "local":
+    if transcribe and not fast_subs and not os.environ.get("GEMINI_API_KEY", "") and engine != "local":
         _say("transcribe needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
         _unpipe()
         return {"ok": 0, "skipped": 0, "total": total}
-    if transcribe and engine == "local" and not ensure_extra("whisper", auto_yes):
+    if transcribe and not fast_subs and engine == "local" and not ensure_extra("whisper", auto_yes):
         _say("local transcription unavailable — stopping before any work.")
         _unpipe()
         return {"ok": 0, "skipped": 0, "total": total}
@@ -815,7 +922,7 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         _say("summarize needs GEMINI_API_KEY (free at aistudio.google.com) — stopping before any work.")
         _unpipe()
         return {"ok": 0, "skipped": 0, "total": total}
-    if (transcribe or summarize or translate or bilingual) and os.environ.get("GEMINI_API_KEY", ""):
+    if ((transcribe and not fast_subs) or summarize or translate or bilingual) and os.environ.get("GEMINI_API_KEY", ""):
         _say("notice: transcripts/summaries will be sent to the Google Gemini API.", flush=True)
     if not to_stdout:  # a stdout job has no resumable artifact; saving out="-" would poison --resume-last
         _save_last(urls=urls, out=os.path.basename(out),
@@ -831,7 +938,8 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                 ts_every=ts_every, single_line=single_line, txt=txt,
                 obsidian=obsidian, cookies_from_browser=cookies_from_browser, jsonl=jsonl,
                 bilingual=bilingual, vtt=vtt, anki=anki, chapters=chapters,
-                sponsorblock=sponsorblock, cite=cite, whisper_model=whisper_model)
+                sponsorblock=sponsorblock, cite=cite, whisper_model=whisper_model,
+                diarize=diarize, fast_subs=fast_subs)
     _say(f"{total} videos found", flush=True)
     if not videos:
         _unpipe()
@@ -845,9 +953,9 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
         raise SystemExit(1)
     store, fout, jfh = oc["store"], oc["fout"], oc["jfh"]
     done, completed, words_by_id = oc["done"], oc["completed"], oc["words_by_id"]
-    todo = oc["todo"]
     try:
-        st = {"ok": 0, "skip": [], "words": 0, "consec": 0, "since_break": 0, "status": ""}
+        st = {"ok": 0, "skip": [], "words": 0, "consec": 0, "since_break": 0, "status": "",
+              "base": len(done)}
         seen_hashes = {}  # pipe-mode in-process dedupe (no db there)
         used_paths = set()
         _BIB_ROWS.clear()
@@ -872,52 +980,52 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
             _say(f"parallel mode: {workers} workers sharing one bucket (~1 fetch/7s)", flush=True)
         with YoutubeDL(ydl_opts):
             for i, v, res in _stream(ydl_opts, work, langs, ts, bucket, workers, fetch_gap,
-                                    clean, clean_level, transcribe, tmpdir, summarize, gemini_model,
+                                    clean, clean_level, transcribe and not fast_subs, tmpdir, summarize, gemini_model,
                                     engine, translate, bilingual, proxy, cookiefile,
                                     vtt, anki, chapters, sponsorblock, cite,
-                                    whisper_model, auto_yes):
+                                    whisper_model, auto_yes, diarize, fast_subs):
                 _vtitle = v.get("title") or v.get("id") or "video"
                 _vurl = v.get("url") or ""
-                _chunk_pause(st, todo, _vtitle, st["words"], t0, verbose, chunk, chunk_cooldown)
+                _chunk_pause(st, total, _vtitle, st["words"], t0, verbose, chunk, chunk_cooldown)
                 st["since_break"] += 1
-                dash_update(st["ok"] + len(st["skip"]), todo, f"[{i}/{total}] {_vtitle}",
+                dash_update(st.get("base", 0) + st["ok"] + len(st["skip"]), total, f"[{i}/{total}] {_vtitle}",
                             st["ok"], len(st["skip"]), st["words"], t0, st["status"])
                 if verbose:
                     log(f"[{i}/{total}] {_vtitle[:70]}")
                 if res["stage"] == "extract":
                     if verbose:
                         log(f"  ! skipped: {res['error']}")
-                    _fail(st, todo, st["words"], t0, verbose, throttle_cooldown,
+                    _fail(st, total, st["words"], t0, verbose, throttle_cooldown,
                           res.get("hint") or res.get("error") or "",
                           _Skip(_vtitle, _vurl, res["error"], res["throttled"]),
-                          "extract failed")
+                          "extract failed", store)
                     continue
                 title, wurl, lg, auto = res["title"], res["wurl"], res["lg"], res["auto"]
                 if res["stage"] == "subs":
                     if verbose:
                         log("  ! no subtitles, skipped")
-                    _fail(st, todo, st["words"], t0, verbose, throttle_cooldown, "",
-                          _Skip(title, wurl, "no subtitles"), "no subtitles")
+                    _fail(st, total, st["words"], t0, verbose, throttle_cooldown, "",
+                          _Skip(title, wurl, "no subtitles"), "no subtitles", store)
                     continue
                 try:
                     text, plain = _prepare_text(res, v, store, seen_hashes, dedupe,
                                                 link_timestamps, ts_every, single_line)
                 except _Skip as sk:
-                    _fail(st, todo, st["words"], t0, verbose, throttle_cooldown, "", sk, "duplicate")
+                    _fail(st, total, st["words"], t0, verbose, throttle_cooldown, "", sk, "duplicate", store)
                     continue
                 if res.get("cached") and verbose:
                     log("  (from cache)")
                 if text is None:
                     if verbose:
                         log(f"  ! subtitle download failed: {res['error']}")
-                    _fail(st, todo, st["words"], t0, verbose, throttle_cooldown,
+                    _fail(st, total, st["words"], t0, verbose, throttle_cooldown,
                           res.get("hint") or res.get("error") or "",
-                          _Skip(title, wurl, res["error"], res["throttled"]), "subtitle failed")
+                          _Skip(title, wurl, res["error"], res["throttled"]), "subtitle failed", store)
                     continue
                 st["consec"], st["status"] = 0, ""
                 if len(text) < 50:
-                    _fail(st, todo, st["words"], t0, verbose, throttle_cooldown, "",
-                          _Skip(title, wurl, "subtitle too short"), "subtitle too short")
+                    _fail(st, total, st["words"], t0, verbose, throttle_cooldown, "",
+                          _Skip(title, wurl, "subtitle too short"), "subtitle too short", store)
                     continue
                 extra = _transblock(text, res, bilingual, translate, verbose)
                 try:
@@ -947,15 +1055,11 @@ def run_job(urls, out, lang_str, max_n, sleep, fresh=False, chunk=50, chunk_cool
                                 "total": len(videos)}
                     _say(red(f"  ! FATAL disk/IO error, stopping: {e}"))
                     raise SystemExit(1)
-                dash_update(st["ok"] + len(st["skip"]), todo, _vtitle, st["ok"], len(st["skip"]),
+                dash_update(st.get("base", 0) + st["ok"] + len(st["skip"]), total, _vtitle, st["ok"], len(st["skip"]),
                             st["words"], t0)
                 time.sleep(sleep)
-        dash_update(todo, todo, "done", st["ok"], len(st["skip"]), st["words"], t0)
+        dash_update(total, total, "done", st["ok"], len(st["skip"]), st["words"], t0)
         dash_end()
-        for t, u, s in st["skip"]:
-            if store is not None:
-                vid = (VID_RE.search(u or "") or [None, u])[1]
-                store.mark_skip(vid or u, t, u, s)
         if not to_stdout:
             fout.close()
         shutil.rmtree(tmpdir, ignore_errors=True)

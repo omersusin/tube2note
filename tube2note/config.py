@@ -22,7 +22,8 @@ CONFIG_PATH = os.path.expanduser("~/.config/yt2md/config.json")
 DEFAULTS = {"outdir": ".", "layout": "single", "timestamps": False, "chunk": 50,
             "chunk_cooldown_min": 10, "lang": "tr,en", "template": "", "clean": True,
             "clean_level": "full", "vtt": False, "anki": False, "chapters": False,
-            "sponsorblock": False, "cite": False, "whisper_model": "tiny"}
+            "sponsorblock": False, "cite": False, "whisper_model": "tiny",
+            "diarize": False, "fast_subs": False}
 
 
 ENV_MAP = {"outdir": "YT2MD_OUTDIR", "layout": "YT2MD_LAYOUT", "lang": "YT2MD_LANG",
@@ -31,7 +32,8 @@ ENV_MAP = {"outdir": "YT2MD_OUTDIR", "layout": "YT2MD_LAYOUT", "lang": "YT2MD_LA
            "clean": "YT2MD_CLEAN", "clean_level": "YT2MD_CLEAN_LEVEL",
            "vtt": "YT2MD_VTT", "anki": "YT2MD_ANKI", "chapters": "YT2MD_CHAPTERS",
            "sponsorblock": "YT2MD_SPONSORBLOCK", "cite": "YT2MD_CITE",
-           "whisper_model": "YT2MD_WHISPER_MODEL"}
+           "whisper_model": "YT2MD_WHISPER_MODEL", "diarize": "YT2MD_DIARIZE",
+           "fast_subs": "YT2MD_FAST_SUBS"}
 
 
 def load_config():
@@ -61,8 +63,10 @@ def load_config():
 
 def save_config(store):
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(store, f, indent=2)
+    os.replace(tmp, CONFIG_PATH)  # atomic: readers never see a half-written config
 
 
 def _merge(base, store, profile, flags, env):
@@ -83,7 +87,8 @@ def _merge(base, store, profile, flags, env):
             cfg[key] = max(0, int(cfg[key]))
         except (ValueError, TypeError):
             cfg[key] = base[key]
-    for key in ("timestamps", "clean", "vtt", "anki", "chapters", "sponsorblock", "cite"):
+    for key in ("timestamps", "clean", "vtt", "anki", "chapters", "sponsorblock", "cite",
+                "diarize", "fast_subs"):
         if isinstance(cfg.get(key), str):
             cfg[key] = cfg[key].lower() in ("1", "y", "yes", "true")
     if cfg.get("whisper_model") not in ("tiny", "base"):

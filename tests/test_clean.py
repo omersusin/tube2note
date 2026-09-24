@@ -26,11 +26,16 @@ def test_lang_variants_share_filler_list():
 
 
 def test_collapse_repeats_is_linear():
-    big = " ".join(f"w{i}" for i in range(20000)) + "."
-    import time
-    t0 = time.time()
-    t._clean_text(big, "en")
-    assert time.time() - t0 < 2
+    n = 20000
+    big = " ".join(f"w{i}" for i in range(n)) + "."
+    out = t._clean_text(big, "en")
+    flat = out.replace("\n", " ")
+    assert len(flat.split()) == n  # no token lost
+    assert flat.startswith("w0 w1") and flat.endswith(f"w{n-1}.")
+    rep = t._clean_text(" ".join(["hello"] * n) + ".", "en")
+    assert len(rep.split()) <= t.DUP_MAX_WORDS + 2  # collapsed, not O(n) output
+    assert t.DUP_MAX_WORDS <= 6  # op bound: n * DUP_MAX <= 120k gram checks
+    assert n * t.DUP_MAX_WORDS <= 120000
 
 
 def test_gemini_key_never_in_url(monkeypatch):

@@ -196,11 +196,13 @@ def md_to_epub(md_path, epub_path=None, meta=None, language="en", lang=None, **k
     container = ('<?xml version="1.0" encoding="utf-8"?>\n<container xmlns="urn:oasis:names:tc:opendocument:'
                  'xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/content.opf" '
                  'media-type="application/oebps-package+xml"/></rootfiles></container>')
-    with zipfile.ZipFile(epub_path, "w") as z:
+    tmp = epub_path + ".tmp"
+    with zipfile.ZipFile(tmp, "w") as z:
         z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr("META-INF/container.xml", container)
         z.writestr("OEBPS/content.opf", opf)
         z.writestr("OEBPS/nav.xhtml", nav)
         for fn, (body, _) in files.items():
             z.writestr("OEBPS/" + fn, body)
+    os.replace(tmp, epub_path)
     return epub_path

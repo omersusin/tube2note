@@ -110,6 +110,26 @@ def _summary_prompt(text, lang):
             f"Reply in {lang}. Transcript:\n\n{text}")
 
 
+def summarize_first(text, model=_GEMINI_MODEL):
+    """Pre-pass: one-line theme + key terms for consistent translation. Returns (theme, [terms]). Never raises."""
+    try:
+        resp = _gemini_call(
+            "Describe this transcript in exactly 2 lines:\nTheme: <one-line topic>\n"
+            f"Terms: <comma-separated key names/terms>\n\n{(text or '')[:4000]}", model)
+    except BaseException:
+        return "", []
+    theme, terms = "", []
+    m = re.search(r"Theme\s*:\s*(.+)", resp)
+    if m:
+        theme = m.group(1).strip()[:200]
+    m = re.search(r"Terms\s*:\s*([^\n]+)", resp)
+    if m:
+        terms = [t.strip() for t in m.group(1).replace("\n", " ").split(",") if t.strip()][:20]
+    if not theme and not terms and resp.strip():
+        theme = resp.strip().splitlines()[0].strip()[:200]
+    return theme, terms
+
+
 def _translate_chunks(text, target, model, budget=4000):
     """Translate long text in ID-marked chunks so timing/structure survives."""
     if not os.environ.get("GEMINI_API_KEY", ""):
@@ -124,10 +144,17 @@ def _translate_chunks(text, target, model, budget=4000):
         n += len(p)
     if cur:
         chunks.append(cur)
+    try:
+        theme, terms = summarize_first(text, model)
+    except Exception:
+        theme, terms = "", []
+    ctx = (f" Context — theme: {theme}." if theme else "")
+    if terms:
+        ctx += f" Key terms (translate consistently): {', '.join(terms)}."
     out = []
     for c in chunks:
         marked = "\n".join(f"[{i}] {p}" for i, p in enumerate(c))
-        prompt = (f"Translate the following to {target}. Keep each [N] marker at the start "
+        prompt = (f"Translate the following to {target}.{ctx} Keep each [N] marker at the start "
                   f"of its paragraph, translate only the text. Reply with the marked paragraphs only:\n\n{marked}")
         resp = _gemini_call(prompt, model)
         lines, cur = {}, None
@@ -199,8 +226,13 @@ def _try_transcribe(vid, lang, tmpdir, model=_GEMINI_MODEL, proxy=None, cookiefi
     try:
         if ext not in AUDIO_MIMES:
             return None, f"audio format .{ext} not accepted by API"
-        if os.path.getsize(path) > AUDIO_MAX_BYTES:
-            return None, "audio too large for API (>18MB)"
+        try:
+            if os.path.getsize(path) > AUDIO_MAX_BYTES:
+                return None, "audio too large for API (>18MB)"
+        except OSError as e:
+            if getattr(e, "errno", None) == 28:
+                raise
+            return None, "audio file not found"
         with open(path, "rb") as f:
             text = _gemini_transcribe(f.read(), AUDIO_MIMES[ext], lang, model)
         if len(text) < 50:

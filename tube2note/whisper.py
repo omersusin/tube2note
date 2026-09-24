@@ -77,6 +77,16 @@ def _check_model_size(p, name):
         pass
 
 
+def _f(x, default=0.0):
+    """Float coercion: strings/None/garbage -> default, never raises."""
+    try:
+        if x is None or (isinstance(x, str) and not x.strip()):
+            return default
+        return float(x)
+    except (TypeError, ValueError):
+        return default
+
+
 def _whisper_ts_to_secs(s, prev=0.0):
     """'HH:MM:SS,mmm' / 'HH:MM:SS.mmm' / secs -> float; garbage keeps prev."""
     try:
@@ -111,32 +121,20 @@ def _parse_whisper_json(data):
             continue
         st = segs[-1][0] if segs else 0.0
         if "start" in it:
-            try:
-                st = float(it["start"])
-            except (TypeError, ValueError):
-                st = segs[-1][0] if segs else 0.0
+            st = _f(it["start"], segs[-1][0] if segs else 0.0)
         elif "t0" in it:
-            try:
-                st = float(it["t0"]) / 100.0  # centiseconds in some builds
-            except (TypeError, ValueError):
-                st = segs[-1][0] if segs else 0.0
+            st = _f(it["t0"], (segs[-1][0] if segs else 0.0) * 100.0) / 100.0  # centiseconds
         elif isinstance(it.get("timestamps"), dict):
             ts = it["timestamps"]
             st = _whisper_ts_to_secs(ts.get("from"), segs[-1][0] if segs else 0.0)
         elif isinstance(it.get("offsets"), dict):
-            try:
-                st = float(it["offsets"].get("from", 0)) / 1000.0
-            except (TypeError, ValueError):
-                st = segs[-1][0] if segs else 0.0
+            st = _f(it["offsets"].get("from", 0), 0) / 1000.0
         elif "from" in it:
             v = it["from"]
             if isinstance(v, str):
                 st = _whisper_ts_to_secs(v, segs[-1][0] if segs else 0.0)
             else:
-                try:
-                    st = float(v or 0) / 1000.0
-                except (TypeError, ValueError):
-                    st = segs[-1][0] if segs else 0.0
+                st = _f(v, 0) / 1000.0
         if segs and segs[-1][1] == text:
             continue  # drop back-to-back dupes, like vtt_segments
         segs.append((st, text))
@@ -201,6 +199,71 @@ def whisper_segments(vid, lang, tmpdir, model="tiny", auto_yes=False,
                 os.remove(f)
             except OSError:
                 pass
+
+
+def diarize_segs(segs, gap=3.0):
+    """Heuristic 2-speaker split: flip SPEAKER_01/02 when gap over `gap` secs.
+
+    Accepts [(start, text)] / [(start, end, text)] / dicts; returns
+    [(start, text, speaker)]. Gap = start - prev end (or prev start).
+    """
+    out, cur, prev = [], "SPEAKER_01", None
+    for s in segs or []:
+        end = None
+        if isinstance(s, dict):
+            st = _f(s.get("start", 0.0))
+            tx, end = str(s.get("text", "")), s.get("end")
+        elif isinstance(s, (list, tuple)) and len(s) >= 2:
+            if len(s) >= 3 and isinstance(s[1], (int, float)) and isinstance(s[2], str):
+                st, end, tx = _f(s[0]), s[1], s[2]
+            else:
+                st = _f(s[0])
+                tx = str(s[1])
+        else:
+            continue
+        end = _f(end, None)
+        if prev is not None and st - prev > gap:
+            cur = "SPEAKER_02" if cur == "SPEAKER_01" else "SPEAKER_01"
+        out.append((st, tx, cur))
+        prev = end if end is not None else st
+    return out
+
+
+def label_segs_llm(segs):
+    """Refine speaker labels via Gemini; fail-open returns input unchanged."""
+    try:
+        items = list(segs or [])
+        if not items:
+            return segs
+        norm = []
+        for s in items:
+            if isinstance(s, dict):
+                norm.append((s.get("start", 0.0), str(s.get("text", "")),
+                             s.get("speaker", "SPEAKER_01")))
+            elif isinstance(s, (list, tuple)) and len(s) >= 3 and str(s[-1]).startswith("SPEAKER_"):
+                norm.append((s[0], s[1] if len(s) == 3 else s[2], str(s[-1])))
+            else:
+                norm = diarize_segs(items, gap=3.0)
+                break
+        else:
+            norm = [(_f(st), str(tx), sp if sp in ("SPEAKER_01", "SPEAKER_02") else "SPEAKER_01")
+                     for st, tx, sp in norm]
+        from .llm import _gemini_call
+        lines = [f"{i} [{sp}]: {tx[:300]}" for i, (st, tx, sp) in enumerate(norm)]
+        prompt = ("Fix 2-speaker labels (SPEAKER_01/SPEAKER_02) for this transcript. "
+                  "Reply ONLY with a JSON list of labels, same length, no commentary.\n" + "\n".join(lines))
+        raw = _gemini_call(prompt).strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        import json as _json
+        labels = _json.loads(raw)
+        if not isinstance(labels, list) or len(labels) != len(norm):
+            return segs
+        fixed = []
+        for (st, tx, sp), lb in zip(norm, labels):
+            lb = str(lb).strip() if isinstance(lb, str) else sp
+            fixed.append((st, tx, lb if lb in ("SPEAKER_01", "SPEAKER_02") else sp))
+        return fixed
+    except BaseException:
+        return segs
 
 
 def _local_transcribe(vid, lang, tmpdir, model="tiny", auto_yes=False,

@@ -2,6 +2,7 @@
 import html
 import re
 
+from .export_srt import clean_cues as clean_cues
 from .links import chapter_heading
 
 TAG_RE = re.compile(r"<(?:/?[A-Za-z][^>]*|\d[^>]*)>")

@@ -1,8 +1,8 @@
 """Markdown transcript -> clean plain text. Pure, no deps."""
 import re
 
-_LINK_RE = re.compile(r"\[([^\]]+)\]\((?:https?://[^)]+)\)")
-_IMG_RE = re.compile(r"!\[([^\]]*)\]\((?:https?://[^)]+)\)")
+_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+_IMG_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
 
 
 def to_txt(text, meta=None, title="", url="", channel="", published="", duration="", views=""):
@@ -19,6 +19,8 @@ def to_txt(text, meta=None, title="", url="", channel="", published="", duration
         published = published or meta.get("published", "")
         duration = duration if duration != "" else meta.get("duration", "")
         views = views if views != "" else meta.get("views", "")
+    if text is None:
+        text = ""
     text = _IMG_RE.sub(r"\1", text)
     text = _LINK_RE.sub(r"[\1]", text)
     out = []
@@ -29,16 +31,15 @@ def to_txt(text, meta=None, title="", url="", channel="", published="", duration
             continue
         if s in ("---", "***"):
             continue
-        if s.startswith("### "):
-            out.append(s[4:].strip())
-            continue
-        if s.startswith("## "):
-            out.append("")
-            out.append(s[3:].strip().upper())
-            out.append("")
-            continue
-        if s.startswith("# "):
-            out.append(s[2:].strip())
+        m = re.match(r"^(#{1,6})\s+(.*)", s)
+        if m:
+            body = m.group(2).strip()
+            if len(m.group(1)) == 2:
+                out.append("")
+                out.append(body.upper())
+                out.append("")
+            else:
+                out.append(body)
             continue
         if s.startswith("- "):
             out.append(s[2:].strip())

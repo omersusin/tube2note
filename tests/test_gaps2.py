@@ -33,32 +33,46 @@ def test_finally_closes_on_systemexit(home, monkeypatch):
 
 
 def test_stop_cancels_first_timer(monkeypatch):
-    import tube2note.web as w
-    timers = []
+    import os as _os
+    import signal as _sig
+    import threading as _th
+    import time as _time
 
-    class T:
-        def __init__(self, s, fn):
-            self.fn = fn
-            self.cancelled = False
-        def start(self):
-            timers.append(self)
-        def cancel(self):
-            self.cancelled = True
-    monkeypatch.setattr(w.threading, "Timer", T)
+    import tube2note.web as w
+    if _os.name != "posix":
+        import pytest
+        pytest.skip("posix signals only")
+    orig_Timer = _th.Timer
+    created = []
+
+    def FastTimer(delay, fn):
+        assert delay == 8  # real escalation delay preserved
+        t = orig_Timer(0.02, fn)
+        created.append(t)
+        return t
+    monkeypatch.setattr(w.threading, "Timer", FastTimer)
     monkeypatch.setattr(w.os, "name", "posix")
-    job = w.Job.__new__(w.Job)
-    job._timer = None
-    job.stopped = False
+    signals, terminated = [], []
 
     class P:
         def send_signal(self, sig):
-            pass
+            signals.append(sig)
+        def terminate(self):
+            terminated.append(True)
         def poll(self):
-            return None
+            return None if not terminated else 0
+    job = w.Job.__new__(w.Job)
+    job._timer = None
+    job.stopped = False
     job.proc = P()
     job.stop()
-    job.stop()
-    assert len(timers) == 2 and timers[0].cancelled and not timers[1].cancelled
+    job.stop()  # must cancel first timer, send SIGINT twice
+    assert signals == [_sig.SIGINT, _sig.SIGINT]
+    assert len(created) == 2
+    _time.sleep(0.15)  # let second (real) timer escalate
+    assert terminated == [True]  # first cancelled, second fired once
+    for t in created:
+        t.cancel()
 
 
 def test_pump_closes_stdout_on_error():

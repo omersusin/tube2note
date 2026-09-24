@@ -22,14 +22,14 @@ from .web import Job, build_argv, list_files, resolve_served
 TOK = os.environ.get("BACKEND_TOKEN", "")
 if not TOK:  # fail closed: random per-boot token, like `serve` (never run open)
     TOK = secrets.token_urlsafe(24)
-    print(f"BACKEND_TOKEN unset: generated {TOK}", flush=True)
+    print("BACKEND_TOKEN unset: generated random per-boot token", flush=True)
 BASE = os.path.abspath(os.environ.get("OUT_DIR", "tube2note-out"))
 HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
-JOBS = {}  # ip -> (Job, timestamp)
+JOBS = {}  # token -> (Job, timestamp)
 try:
     MAX_JOBS = max(1, min(32, int(os.environ.get("BACKEND_MAX_JOBS", "4"))))
 except (TypeError, ValueError):
-    MAX_JOBS = 4  # global cap: no fork-bombs via spoofed IP headers
+    MAX_JOBS = 4  # global cap on concurrent jobs
 MAX_JOBS_ENTRIES = 128  # total entries cap: dict-flood guard
 _JOBS_LOCK = asyncio.Lock()
 
@@ -67,15 +67,29 @@ def _ok(u):
         return False
     return s.scheme in ("http", "https") and (s.hostname or "").lower() in HOSTS
 
+def _is_trusted_proxy(host):
+    h = (host or "").strip().lower().strip("[]")
+    if h in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+        return True
+    if h.startswith(("10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
+                      "172.2", "172.30.", "172.31.", "fc", "fd", "fe80:")):
+        # private nets (docker/fly/render gateways); explicit TRUSTED_PROXIES wins below
+        return True
+    extra = os.environ.get("TRUSTED_PROXIES", "")
+    return bool(extra) and h in {x.strip().lower().strip("[]") for x in extra.split(",") if x.strip()}
+
 def _ip(req: Request):
-    # trusted-proxy order: Fly-Client-IP, X-Forwarded-For first, else direct
+    # only trust proxy headers when the direct peer is a known proxy; else use direct peer
+    direct = req.client.host if req.client else "?"
+    if not _is_trusted_proxy(direct):
+        return direct
     fci = req.headers.get("fly-client-ip", "").strip()
     if fci:
         return fci.split(",")[0].strip()
     xff = req.headers.get("x-forwarded-for", "").strip()
     if xff:
         return xff.split(",")[0].strip()
-    return req.client.host if req.client else "?"
+    return direct
 
 def _live(j):
     return j is not None and j[0].running
@@ -97,7 +111,7 @@ async def start(req: Request, x_token: Optional[str] = Header(None)):
         raise HTTPException(400, "urls must be a list")
     if not urls or len(urls) > 50 or any(not _ok(u) for u in urls):
         raise HTTPException(400, "need 1-50 youtube.com/youtu.be urls")
-    ip = _ip(req)
+    tok = x_token or ""
     now = time.time()
     try:
         argv = build_argv(p, BASE)
@@ -106,33 +120,36 @@ async def start(req: Request, x_token: Optional[str] = Header(None)):
     os.makedirs(BASE, exist_ok=True)
     async with _JOBS_LOCK:
         _prune_jobs(now)
-        if _live(JOBS.get(ip)):
+        if _live(JOBS.get(tok)):
             raise HTTPException(409, "job already running")
         live = sum(1 for j in JOBS.values() if _live(j))
         if live >= MAX_JOBS:
             raise HTTPException(503, "server busy, try again later")
-        JOBS[ip] = (Job(argv, argv[argv.index("-o") + 1], "--dry-run" in argv), now)
+        JOBS[tok] = (Job(argv, argv[argv.index("-o") + 1], "--dry-run" in argv), now)
     return {"ok": True}
+
 
 @app.post("/api/stop")
 async def stop(req: Request, x_token: Optional[str] = Header(None)):
     _auth(x_token)
     async with _JOBS_LOCK:
-        j = JOBS.get(_ip(req))
+        j = JOBS.get(x_token or "")
     if j:
         j[0].stop()
     return {"ok": True}
+
 
 @app.get("/api/state")
 async def state(req: Request, x_token: Optional[str] = Header(None)):
     _auth(x_token)
     async with _JOBS_LOCK:
-        j = JOBS.get(_ip(req))
+        j = JOBS.get(x_token or "")
     return {"job": j[0].snapshot() if j else None, "files": list_files(BASE)}
 
+
 @app.get("/api/download")
-def dl(path: str, t: Optional[str] = None, x_token: Optional[str] = Header(None)):
-    _auth(t or x_token)  # browsers can't set headers on <a> navigation: ?t= fallback
+def dl(path: str, x_token: Optional[str] = Header(None)):
+    _auth(x_token)  # header-only: tokens never travel in URLs
     full = resolve_served(BASE, path)
     if not full:
         raise HTTPException(404, "not found")
@@ -146,7 +163,8 @@ def healthz():
 def main():
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")),
-                proxy_headers=True, forwarded_allow_ips="*")
+                proxy_headers=True,
+                forwarded_allow_ips=os.environ.get("TRUSTED_PROXIES", "127.0.0.1,::1"))
 
 if __name__ == "__main__":
     main()

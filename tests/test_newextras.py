@@ -87,7 +87,7 @@ def test_mcp_download_dispatch(monkeypatch):
     from tube2note.mcp import _handle
     monkeypatch.setattr(job, "run_job", lambda *a, **k: {"ok": 1, "skipped": 0, "total": 1})
     r, _ = _handle({"id": 1, "method": "tools/call",
-                    "params": {"name": "download", "arguments": {"url": "http://v"}}})
+                    "params": {"name": "download", "arguments": {"url": "https://www.youtube.com/watch?v=aaaaaaaaaaa"}}})
     assert "exit=0" in r["result"]["content"][0]["text"]
 
 
@@ -175,33 +175,99 @@ def test_daemon_requires_interval(home, monkeypatch):
 
 
 def test_daemon_detach_sequence_mocked(home, monkeypatch, capsys):
+    import signal as _sig
+
     import tube2note.ui as ui
     import tube2note.watch as w
     monkeypatch.setattr(ui, "UI_ON", True)  # prove detach resets it (auto-reverted)
-    calls = []
+    calls, umasks, dup2s, sigs, opens = [], [], [], [], []
     monkeypatch.setattr(w.os, "fork", lambda: calls.append("fork") or 0)
     monkeypatch.setattr(w.os, "setsid", lambda: calls.append("setsid"))
-    monkeypatch.setattr(w.os, "dup2", lambda a, b: None)
-    monkeypatch.setattr(w.os, "umask", lambda m: None)
+    monkeypatch.setattr(w.os, "dup2", lambda a, b: dup2s.append((a, b)))
+    monkeypatch.setattr(w.os, "umask", lambda m: umasks.append(m))
     _real_open = open
 
     def _fake_open(*a, **k):
         mode = a[1] if len(a) > 1 else k.get("mode", "r")
         if "w" in mode or "a" in mode or "+" in mode:
+            opens.append((a[0], mode))
             return _real_open("/dev/null", "a")
         return _real_open(*a, **k)
     monkeypatch.setattr("builtins.open", _fake_open)
-    monkeypatch.setattr(w.signal, "signal", lambda s, h: None)
+    monkeypatch.setattr(w.signal, "signal", lambda s, h: sigs.append(s))
     monkeypatch.setattr(w, "_check", lambda *a, **k: 0)
     sleeps = []
     monkeypatch.setattr(w.time, "sleep", lambda s: sleeps.append(s) or (_ for _ in ()).throw(KeyboardInterrupt))
     monkeypatch.setattr(w.os, "getpid", lambda: 4242)
     assert w.cmd_watch(["http://ch", "-o", "w.md", "--daemon", "--interval", "5"]) == 0
-    assert calls.count("fork") == 2 and "setsid" in calls
+    assert calls == ["fork", "setsid", "fork"]  # real double-fork order
+    assert umasks == [0o022]
+    assert sorted(b for _, b in dup2s) == [0, 1, 2]  # stdin/stdout/stderr redirected
+    assert sigs == [_sig.SIGTERM]
+    assert any("watch.log" in str(p) and "a" in m for p, m in opens)
     assert ui.UI_ON is False
     assert sleeps == [300.0]
     import json
     assert json.load(open(w._pid_path()))["pid"] == 4242
+
+
+def test_daemon_first_parent_exits(home, monkeypatch, capsys):
+    import select as _select
+
+    import tube2note.watch as w
+    monkeypatch.setattr(w.os, "pipe", lambda: (101, 102))
+    monkeypatch.setattr(w.os, "fork", lambda: 123)
+    monkeypatch.setattr(w.os, "waitpid", lambda pid, opt: (pid, 0))
+    monkeypatch.setattr(_select, "select", lambda r, w_, x, t=None: ([101], [], []))
+    monkeypatch.setattr(w.os, "read", lambda fd, n: b"456")
+    monkeypatch.setattr(w.os, "close", lambda fd: None)
+    import pytest
+    with pytest.raises(SystemExit) as e:
+        w._daemonize(str(home / "w.log"), str(home / "w.pid"))
+    assert e.value.code == 0
+    assert "daemon started (pid 456" in capsys.readouterr().out
+
+
+def test_daemon_second_parent_prints(home, monkeypatch, capsys):
+    import tube2note.watch as w
+    seq = iter([0, 456])
+    monkeypatch.setattr(w.os, "pipe", lambda: (101, 102))
+    monkeypatch.setattr(w.os, "fork", lambda: next(seq))
+    monkeypatch.setattr(w.os, "setsid", lambda: None)
+    monkeypatch.setattr(w.os, "close", lambda fd: None)
+    monkeypatch.setattr(w.os, "write", lambda fd, b: len(b))
+    import pytest
+    with pytest.raises(SystemExit) as e:
+        w._daemonize(str(home / "w.log"), str(home / "w.pid"))
+    assert e.value.code == 0  # intermediate parent exits quietly; origin prints after handshake
+
+
+def test_whisper_segments_fake_binary(home, monkeypatch, tmp_path):
+    import subprocess
+
+    import tube2note.whisper as wsp
+    monkeypatch.setattr(wsp, "find_whisper", lambda: ("/fake/whisper-cli", ""))
+    monkeypatch.setattr(wsp.shutil, "which", lambda c: "/fake/ffmpeg")
+    monkeypatch.setattr(wsp, "ensure_whisper_model", lambda *a, **k: "/fake/ggml-tiny.bin")
+    monkeypatch.setattr(wsp, "_download_audio",
+                        lambda vid, td, proxy=None, cookiefile=None:
+                        (str(tmp_path / "a.mp3"), None) if (open(tmp_path / "a.mp3", "wb").write(b"x"), True) else (None, "x"))
+
+    def fake_run(cmd, **k):
+        if cmd[0] == "ffmpeg":
+            open(tmp_path / "v_16k.wav", "wb").write(b"wav")
+            return type("R", (), {"returncode": 0})()
+        stem = cmd[cmd.index("-of") + 1]
+        open(stem + ".txt", "w", encoding="utf-8").write("hello world " * 20)
+        import json as _j
+        _j.dump({"segments": [{"start": 0.0, "text": "hello world"}]},
+                open(stem + ".json", "w", encoding="utf-8"))
+        return type("R", (), {"returncode": 0})()
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    text, segs, note = wsp.whisper_segments("v", "en", str(tmp_path))
+    assert len(text.split()) >= 20 and segs == [(0.0, "hello world")] and "whisper" in note
+    monkeypatch.setattr(wsp, "find_whisper", lambda: (None, "nope"))
+    assert wsp.whisper_segments("v", "en", str(tmp_path))[0] is None
 
 
 def test_double_start_refused(home, monkeypatch, capsys):

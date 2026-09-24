@@ -19,16 +19,7 @@ from .llm import _GEMINI_MODEL
 
 
 def run_job(*a, **k):
-    # ponytail: drop unknown kwargs for old job.py; remove when job.py accepts new flags
-    import inspect as _inspect
-    _fn = _jobmod.run_job
-    try:
-        _params = _inspect.signature(_fn).parameters
-        if not any(p.kind == _inspect.Parameter.VAR_KEYWORD for p in _params.values()):
-            k = {kk: vv for kk, vv in k.items() if kk in _params}
-    except (ValueError, TypeError):
-        pass
-    return _fn(*a, **k)
+    return _jobmod.run_job(*a, **k)  # unknown kwargs raise TypeError (no silent drops)
 from .output import _purge_video
 from .pdf import md_to_pdf
 from .selftest import _self_test
@@ -124,8 +115,9 @@ def main():
                "  tube2note 'https://www.youtube.com/playlist?list=PL...' -o out.md\n"
                "  tube2note --resume-last\n"
                "  tube2note status ./out --json\n"
-               "  tube2note --vtt --anki --chapters --sponsorblock --cite URL\n"
-               "  tube2note --engine local --whisper-model base URL")
+                "  tube2note --vtt --txt --anki --chapters --sponsorblock --cite URL\n"
+                "  tube2note --diarize --fast-subs --transcribe --summarize URL\n"
+                "  tube2note --engine local --whisper-model base URL")
     ap.add_argument("urls", nargs="*", help="channel / playlist / video URLs")
     g_src = ap.add_argument_group("Sources", "what to collect")
     g_src.add_argument("--max", type=int, default=None, help="max number of videos")
@@ -180,6 +172,10 @@ def main():
                     help="append APA/MLA/Chicago/BibTeX/RIS citations")
     g_fmt.add_argument("--no-cite", dest="cite", action="store_false",
                     help="turn off citations (e.g. on --resume-last)")
+    g_fmt.add_argument("--diarize", dest="diarize", action="store_true", default=None,
+                    help="prefix transcript lines with SPEAKER_XX (heuristic 2-speaker split)")
+    g_fmt.add_argument("--no-diarize", dest="diarize", action="store_false",
+                    help="turn off diarization (e.g. on --resume-last)")
     g_fmt.add_argument("--ts-every", type=int, default=None,
                     help="keep 1 timestamp per N seconds (0=all, e.g. --ts-every 30)")
     g_fmt.add_argument("--single-line", dest="single_line", action="store_true", default=None,
@@ -196,6 +192,10 @@ def main():
     g_ai.add_argument("--translate", default=None, help="translate transcript to LANG via Gemini (needs GEMINI_API_KEY), e.g. tr")
     g_ai.add_argument("--bilingual", default=None, help="source + translation interleaved per paragraph via Gemini (needs GEMINI_API_KEY), e.g. tr")
     g_ai.add_argument("--gemini-model", default=None, help="Gemini model for transcribe/summarize (default: gemini-2.5-flash-lite)")
+    g_ai.add_argument("--fast-subs", dest="fast_subs", action="store_true", default=None,
+                    help="subs-only: skip audio download/transcribe attempts")
+    g_ai.add_argument("--no-fast-subs", dest="fast_subs", action="store_false",
+                    help="turn off fast-subs (e.g. on --resume-last)")
     g_adv = ap.add_argument_group("Advanced", "fetching, auth, misc")
     g_adv.add_argument("--lang", default=None, help="subtitle language priority, comma separated")
     g_adv.add_argument("--sleep", type=float, default=None, help="pause between videos (s)")
@@ -283,7 +283,7 @@ def main():
                   " e.g. tube2note 'https://www.youtube.com/watch?v=...'", file=sys.stderr)
     if a.tui:
         try:
-            tui()
+            tui(profile=a.profile or os.environ.get("YT2MD_PROFILE") or None)
         except (KeyboardInterrupt, EOFError):
             print("\nExit.")
         return
@@ -294,7 +294,7 @@ def main():
             _tty = False
         if _tty:
             try:
-                tui()
+                tui(profile=a.profile or os.environ.get("YT2MD_PROFILE") or None)
             except (KeyboardInterrupt, EOFError):
                 print("\nExit.")
             return
@@ -309,6 +309,7 @@ def main():
                           "clean_level": a.clean_level, "vtt": a.vtt,
                           "anki": a.anki, "chapters": a.chapters,
                           "sponsorblock": a.sponsorblock, "cite": a.cite,
+                          "diarize": a.diarize, "fast_subs": a.fast_subs,
                           "whisper_model": a.whisper_model}, profile)
     max_n = max(1, a.max if a.max is not None else 100)
     sleep = max(0.0, a.sleep if a.sleep is not None else 2.0)
@@ -401,6 +402,8 @@ def main():
                               else last.get("sponsorblock", False)),
                 cite=(a.cite if a.cite is not None else last.get("cite", False)),
                 whisper_model=(a.whisper_model or last.get("whisper_model") or cfg["whisper_model"]),
+                diarize=(a.diarize if a.diarize is not None else last.get("diarize", False)),
+                fast_subs=(a.fast_subs if a.fast_subs is not None else last.get("fast_subs", False)),
                 profile=profile, auto_yes=a.yes))
     _res = run_job(a.urls, a.out, cfg["lang"], max_n, sleep, a.fresh, cfg["chunk"],
             chunk_cooldown, a.throttle_cooldown, outdir=cfg["outdir"],
@@ -418,5 +421,6 @@ def main():
             cookies_from_browser=a.cookies_from_browser,
             vtt=cfg["vtt"], anki=cfg["anki"], chapters=cfg["chapters"],
             sponsorblock=cfg["sponsorblock"], cite=cfg["cite"],
-            whisper_model=cfg["whisper_model"])
+            whisper_model=cfg["whisper_model"], diarize=cfg["diarize"],
+            fast_subs=cfg["fast_subs"])
     return _exit_code(_res)

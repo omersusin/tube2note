@@ -93,11 +93,12 @@ def fmt_chicago(d):
 
 def _bibtex_escape(s):
     s = str(s)
-    s = s.replace("\\", r"\textbackslash{}")
+    ph = "\x00"  # stash backslashes so \{ below doesn't re-escape \textbackslash{}
+    s = s.replace("\\", ph)
     for c in ("{", "}", "&", "%", "$", "#", "_"):
         s = s.replace(c, "\\" + c)
     s = s.replace("~", r"\~{}").replace("^", r"\^{}")
-    return s
+    return s.replace(ph, r"\textbackslash{}")
 
 
 def to_bibtex(d, key=None):
@@ -109,7 +110,7 @@ def to_bibtex(d, key=None):
               f"  title = {{{_bibtex_escape(d['title'])}}}", f"  year = {{{year}}}",
               "  howpublished = {YouTube}"]
     if d.get("url"):
-        fields.append(f"  url = {{{d['url']}}}")
+        fields.append(f"  url = {{{_bibtex_escape(d['url'])}}}")
     if d.get("duration"):
         fields.append(f"  note = {{{_bibtex_escape(d['duration'])}}}")
     return f"@misc{{{key},\n" + ",\n".join(fields) + ",\n}"

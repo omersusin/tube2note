@@ -13,8 +13,13 @@ from .source import expand
 from .subs import load_subs
 
 
-def _state_path(urls, out):
-    key = hashlib.sha256(("\n".join(sorted(urls)) + "\n" + out).encode()).hexdigest()[:16]
+def _state_path(urls, out, outdir="", lang=""):
+    parts = list(sorted(urls)) + [out]
+    if outdir:
+        parts.append(outdir)
+    if lang:
+        parts.append(lang)
+    key = hashlib.sha256(("\n".join(parts)).encode()).hexdigest()[:16]
     return os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
                         "tube2note", "watch", key + ".json")
 
@@ -63,15 +68,15 @@ def _pid_path(key=None, out=None):
     return os.path.join(base, f"watch-{h}.pid")
 
 
-def _watch_key(targets):
+def _watch_key(targets, outdir=""):
     """Per-watch identity (hash of state paths): distinct subs/out sets get distinct pidfiles."""
     parts = []
     for sub, o, lang in targets:
         url = sub.get("url") if isinstance(sub, dict) else str(sub)
         try:
-            parts.append(_state_path([url], o or ""))
+            parts.append(_state_path([url], o or "", outdir or "", lang or ""))
         except Exception:
-            parts.append(f"{url}|{o}|{lang}")
+            parts.append(f"{url}|{o}|{lang}|{outdir}")
     return hashlib.sha256("\n".join(sorted(parts)).encode()).hexdigest()[:16]
 
 
@@ -144,7 +149,8 @@ def _is_ours(pid):
 
 def _default_log_path(a):
     cfg = resolve_config({"outdir": a.dir, "layout": a.layout, "lang": a.lang,
-                          "clean": a.clean}, None)
+                          "clean": a.clean},
+                         getattr(a, "profile", None) or os.environ.get("YT2MD_PROFILE") or None)
     outdir = os.path.abspath(os.path.expanduser(cfg["outdir"]))
     if outdir == os.path.abspath("."):
         return os.path.join(_cache_base(), "tube2note", "watch.log")
@@ -155,20 +161,65 @@ def _daemonize(logpath, pidpath):
     if os.name == "nt" or not hasattr(os, "fork"):
         raise SystemExit("watch --daemon is not supported on Windows "
                          "(use --interval with Task Scheduler instead).")
+    import select
+    r, w = os.pipe()
     try:
         pid = os.fork()
     except OSError as e:
+        os.close(r)
+        os.close(w)
         raise SystemExit(f"watch: fork failed: {e}")
     if pid > 0:
-        raise SystemExit(0)
+        # parent: handshake before success (grandchild signals pidfile written)
+        os.close(w)
+        try:
+            os.waitpid(pid, 0)
+        except (OSError, ChildProcessError):
+            pass
+        me = b""
+        try:
+            if select.select([r], [], [], 10)[0]:
+                me = os.read(r, 64)
+        except OSError:
+            me = b""
+        finally:
+            try:
+                os.close(r)
+            except OSError:
+                pass
+        if me.strip() and me.strip() != b"ERR":
+            try:
+                gpid = int(me.strip())
+            except (ValueError, TypeError):
+                gpid = -1
+            print(f"watch: daemon started (pid {gpid}, log {logpath})", flush=True)
+            raise SystemExit(0)
+        print("watch: daemon failed to start (pidfile not written).", flush=True)
+        raise SystemExit(1)
     os.setsid()
     try:
         pid2 = os.fork()
     except OSError as e:
+        try:
+            os.write(w, b"ERR")
+        except OSError:
+            pass
         raise SystemExit(f"watch: second fork failed: {e}")
     if pid2 > 0:
-        print(f"watch: daemon started (pid {pid2}, log {logpath})", flush=True)
+        # intermediate: exit quietly, original parent prints after handshake
+        try:
+            os.close(r)
+        except OSError:
+            pass
+        try:
+            os.close(w)
+        except OSError:
+            pass
         raise SystemExit(0)
+    try:
+        os.close(r)
+    except OSError:
+        pass
     os.umask(0o022)  # keep cwd: relative -o/-d/--subs/--cookies paths must keep working
     logf = open(logpath, "a", encoding="utf-8", buffering=1)
     os.dup2(open(os.devnull, "r").fileno(), 0)
@@ -180,7 +231,20 @@ def _daemonize(logpath, pidpath):
     me = os.getpid()
     if not _write_pidfile(pidpath, me):
         print("watch: PID file already exists (another daemon starting?) — exiting.", flush=True)
+        try:
+            os.write(w, b"ERR")
+        except OSError:
+            pass
         raise SystemExit(1)
+    try:
+        os.write(w, str(me).encode())
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(w)
+        except OSError:
+            pass
 
     def _on_term(signum, frame):
         try:
@@ -234,16 +298,20 @@ def _cmd_stop():
     if not any(_read_pidfile(p).get("pid") for p in cands):
         print("watch: not running (no PID file).")
         return 1
-    code = 1
+    any_ok = False
+    any_fail = False
     for p in cands:
         if _read_pidfile(p).get("pid"):
-            code = _stop_one(p) and code  # 0 if any daemon stopped
-    return code
+            if _stop_one(p) == 0:
+                any_ok = True
+            else:
+                any_fail = True
+    return 0 if any_ok else (1 if any_fail else 1)  # 0 iff any daemon stopped
 
 
 def _check(urls, out, cfg, args, since=None):
     """One check: list fresh, run new videos, update seen. Returns exit code."""
-    path = _state_path(urls, out)
+    path = _state_path(urls, out, cfg.get("outdir", ""), cfg.get("lang", ""))
     seen = _load_seen(path)
     try:
         if since:  # per-sub since; omitted when unset (keeps old expand mocks working)
@@ -266,13 +334,22 @@ def _check(urls, out, cfg, args, since=None):
     print(f"watch: {len(fresh)} new video(s): " + ", ".join(
         (v.get("title") or v.get("id") or "?")[:50] for v in fresh[:5]))
     urls_to_get = [v.get("url") for v in fresh if v.get("url")]
+    prof = getattr(args, "profile", None) or os.environ.get("YT2MD_PROFILE") or None
     res = (run_job(urls_to_get, out, cfg["lang"], len(fresh), args.sleep,
                    False, cfg["chunk"], cfg["chunk_cooldown_min"] * 60, args.throttle_cooldown,
                    videos=fresh, outdir=cfg["outdir"], ts=cfg["timestamps"] or args.timestamps,
                    verbose=args.verbose, layout=cfg["layout"], template=cfg["template"],
                    pdf=args.pdf, proxy=args.proxy, cookiefile=args.cookies, since=since,
-                   clean=cfg["clean"], clean_level=cfg["clean_level"],
-                   link_timestamps=args.link_timestamps, srt=args.srt) or {})
+                   clean=cfg["clean"], clean_level=cfg.get("clean_level", "full"),
+                   link_timestamps=args.link_timestamps, srt=args.srt,
+                   vtt=cfg.get("vtt", False) or getattr(args, "vtt", False),
+                   txt=getattr(args, "txt", False),
+                   transcribe=getattr(args, "transcribe", False),
+                   summarize=getattr(args, "summarize", False),
+                   diarize=cfg.get("diarize", False),
+                   fast_subs=cfg.get("fast_subs", False),
+                   whisper_model=cfg.get("whisper_model", "tiny"),
+                   profile=prof) or {})
     # save seen ONLY on a clean run: partial runs retry next round (.done makes it cheap)
     if res.get("total", 0) > 0 and res.get("skipped", 1) == 0:
         _save_seen(path, seen | {v.get("id") for v in videos if v.get("id")})
@@ -303,6 +380,21 @@ def cmd_watch(argv):
     ap.add_argument("--layout", default=None)
     ap.add_argument("--lang", default=None)
     ap.add_argument("--no-clean", dest="clean", action="store_false", default=None)
+    ap.add_argument("--clean-level", default=None, help="cleaning strength: light or full")
+    ap.add_argument("--diarize", dest="diarize", action="store_true", default=None)
+    ap.add_argument("--no-diarize", dest="diarize", action="store_false")
+    ap.add_argument("--fast-subs", dest="fast_subs", action="store_true", default=None,
+                    help="subs-only: skip audio download/transcribe attempts")
+    ap.add_argument("--no-fast-subs", dest="fast_subs", action="store_false")
+    ap.add_argument("--vtt", dest="vtt", action="store_true", default=None)
+    ap.add_argument("--no-vtt", dest="vtt", action="store_false")
+    ap.add_argument("--txt", dest="txt", action="store_true", default=None)
+    ap.add_argument("--no-txt", dest="txt", action="store_false")
+    ap.add_argument("--transcribe", action="store_true")
+    ap.add_argument("--summarize", action="store_true")
+    ap.add_argument("--whisper-model", dest="whisper_model", default=None,
+                    choices=["tiny", "base"])
+    ap.add_argument("--profile", default=None, help="config profile name (or YT2MD_PROFILE)")
     ap.add_argument("--timestamps", action="store_true")
     ap.add_argument("--link-timestamps", action="store_true")
     ap.add_argument("--srt", action="store_true")
@@ -329,13 +421,17 @@ def cmd_watch(argv):
 
     def _round():
         code = 0
+        prof = a.profile or os.environ.get("YT2MD_PROFILE") or None
         for sub, out, lang in targets:
             if not out:
                 print(f"watch: entry {sub.get('url')} has no out, skipped.")
                 code = code or 1
                 continue
             cfg = resolve_config({"outdir": a.dir, "layout": a.layout, "lang": lang,
-                                  "clean": a.clean}, None)
+                                  "clean": a.clean, "clean_level": a.clean_level,
+                                  "vtt": a.vtt, "diarize": a.diarize,
+                                  "fast_subs": a.fast_subs,
+                                  "whisper_model": a.whisper_model}, prof)
             code = _check([sub["url"]], out, cfg, a,
                           since=sub.get("since") if isinstance(sub, dict) else None) or code
         return code
@@ -347,7 +443,7 @@ def cmd_watch(argv):
             os.makedirs(os.path.dirname(logpath), exist_ok=True)
         except OSError as e:
             ap.error(f"cannot write log dir: {e}")
-        pidpath = _pid_path(_watch_key(targets))
+        pidpath = _pid_path(_watch_key(targets, a.dir))
         data = _read_pidfile(pidpath)
         old = data.get("pid")
         if old and _pid_is_alive(old) and _is_ours(old):

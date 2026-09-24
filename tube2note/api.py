@@ -32,7 +32,8 @@ def collect(urls, out="tube2note.md", profile=None, overrides=None, **kw):
         cookies_from_browser=kw.get("cookies_from_browser"),
         vtt=kw.get("vtt", False), anki=kw.get("anki", False),
         chapters=kw.get("chapters", False), sponsorblock=kw.get("sponsorblock", False),
-        cite=kw.get("cite", False))
+        cite=kw.get("cite", False), whisper_model=kw.get("whisper_model", "tiny"),
+        diarize=kw.get("diarize", False), fast_subs=kw.get("fast_subs", False))
     return _exit_code(res), (res or {})
 
 def list_videos(urls, max_n=100, since=None):

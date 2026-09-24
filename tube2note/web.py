@@ -158,6 +158,39 @@ def build_argv(p, base_dir, python=None):
     workers = _int(p.get("workers"), 1, 4, 1, "Workers")
     if workers > 1:
         argv += ["--workers", str(workers)]
+    if _bool(p.get("txt")):
+        argv.append("--txt")
+    if _bool(p.get("jsonl")):
+        argv.append("--jsonl")
+    if _bool(p.get("diarize")):
+        argv.append("--diarize")
+    if _bool(p.get("fast_subs") or p.get("fast-subs")):
+        argv.append("--fast-subs")
+    wm = str(p.get("whisper_model") or p.get("whisper-model") or "").strip()
+    if wm:
+        if wm not in ("tiny", "base"):
+            raise ValueError("Unknown whisper model")
+        argv += ["--whisper-model", wm]
+    eng = str(p.get("engine") or "").strip()
+    if eng:
+        if eng not in ("api", "local"):
+            raise ValueError("Unknown engine")
+        argv += ["--engine", eng]
+    cl = str(p.get("clean_level") or p.get("clean-level") or "").strip()
+    if cl:
+        if cl not in ("light", "full"):
+            raise ValueError("Unknown clean level")
+        argv += ["--clean-level", cl]
+    tmpl = str(p.get("template") or p.get("name_template") or p.get("name-template") or "").strip()
+    if tmpl:
+        if "\x00" in tmpl or len(tmpl) > 200:
+            raise ValueError("Bad template")
+        argv += ["--name-template", tmpl]
+    px = str(p.get("proxy") or "").strip()
+    if px:
+        if "\x00" in px or len(px) > 500 or px.startswith("-"):
+            raise ValueError("Bad proxy")
+        argv += ["--proxy", px]
     if _bool(p.get("pdf")):
         argv.append("--pdf")
     if _bool(p.get("epub")):
@@ -178,6 +211,11 @@ def build_argv(p, base_dir, python=None):
                 if not TARGET_RE.match(val):
                     raise ValueError(f"{label} target must be a language code like tr")
                 argv += ["--translate", val] if label == "Translate" else ["--bilingual", val]
+        gm = str(p.get("gemini_model") or p.get("gemini-model") or "").strip()
+        if gm:
+            if "\x00" in gm or len(gm) > 120:
+                raise ValueError("Bad gemini model")
+            argv += ["--gemini-model", gm]
     argv.append("--")
     argv += urls
     return argv
@@ -191,7 +229,7 @@ class Job:
     def __init__(self, argv, name, dry_run=False):
         self.argv, self.name, self.dry_run = argv, name, dry_run
         self._timer = None
-        self.lines = collections.deque(maxlen=400)
+        self.lines = collections.deque(maxlen=2000)
         self.lock = threading.Lock()
         self.progress = {"done": 0, "total": 0, "words": 0}
         self.current = ""
@@ -228,7 +266,7 @@ class Job:
 
     @property
     def running(self):
-        return self.proc.poll() is None or self.ended is None
+        return self.proc.poll() is None and self.ended is None
 
     def stop(self):
         if self.proc.poll() is not None:
@@ -349,9 +387,6 @@ class App:
             return True
         return any(host.endswith(s) for s in self.extra_hosts if s.startswith("."))
 
-    def any_host(self):
-        return self.host in ("0.0.0.0", "::", "")
-
     def state(self):
         with self.lock:
             job = self.job.snapshot() if self.job else None
@@ -365,7 +400,9 @@ class App:
         if self.public and isinstance(payload, dict):
             # anonymous visitors must never spend the host's Gemini quota
             payload = {k: v for k, v in payload.items()
-                       if k not in ("transcribe", "summarize", "translate", "bilingual")}
+                       if k not in ("transcribe", "summarize", "translate", "bilingual",
+                                    "engine", "gemini_model", "gemini-model",
+                                    "fast_subs", "fast-subs", "whisper_model", "whisper-model")}
         argv = self.argv_builder(payload, self.base_dir)
         with self.lock:
             if self.job and self.job.running:
@@ -416,7 +453,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _host_ok(self):
         host = (self.headers.get("Host") or "").strip()
         name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
-        return self.app.any_host() or self.app.host_ok(name)
+        return self.app.host_ok(name)
+
+    def _serve_file(self, full, ctype, disposition=None):
+        try:
+            size = os.path.getsize(full)
+        except OSError:
+            return self._err(404, "not found")
+        start, end, code = 0, size - 1, 200
+        rng = (self.headers.get("Range") or "").strip()
+        if rng.startswith("bytes=") and size:
+            try:
+                spec = rng[6:].split(",")[0].strip()
+                s, _, e = spec.partition("-")
+                if s == "":
+                    start = max(0, size - int(e))
+                    end = size - 1
+                elif e == "":
+                    start, end = int(s), size - 1
+                else:
+                    start, end = int(s), int(e)
+                if not 0 <= start <= end < size:
+                    raise ValueError
+                code = 206
+            except ValueError:
+                return self._send(416, b"", "text/plain", {"Content-Range": f"bytes */{size}"})
+        length = (end - start + 1) if size else 0
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if code == 206:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        if disposition:
+            self.send_header("Content-Disposition", disposition)
+        self.end_headers()
+        if self.command == "HEAD" or not length:
+            return
+        try:
+            with open(full, "rb") as f:
+                f.seek(start)
+                left = length
+                while left > 0:
+                    chunk = f.read(min(65536, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+        except (OSError, BrokenPipeError, ConnectionResetError):
+            pass
 
     def _cookie_token(self):
         for part in (self.headers.get("Cookie") or "").split(";"):
@@ -461,14 +549,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             full = resolve_served(self.app.base_dir, rel)
             if not full:
                 return self._err(404, "not found")
-            with open(full, "rb") as f:
-                data = f.read()
             ctype = SERVED_EXT[os.path.splitext(full)[1].lower()]
             if "view" in q and ctype == "text/markdown":
-                return self._send(200, data, "text/plain; charset=utf-8")
+                return self._serve_file(full, "text/plain; charset=utf-8")
             fname = urllib.parse.quote(os.path.basename(full))
-            return self._send(200, data, ctype + ("; charset=utf-8" if ctype.startswith("text") else ""),
-                              {"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"})
+            return self._serve_file(full, ctype + ("; charset=utf-8" if ctype.startswith("text") else ""),
+                                    f"attachment; filename*=UTF-8''{fname}")
         return self._err(404, "not found")
 
     def do_POST(self):

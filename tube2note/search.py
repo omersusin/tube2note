@@ -52,32 +52,41 @@ def search_collections(query, base=".", as_json=False, limit=50):
         if len(hits) >= limit:
             break
         for fn in files:
+            if len(hits) >= limit:
+                break
             if not fn.endswith(".md") or fn == "INDEX.md":
                 continue
             p = os.path.join(root, fn)
             try:
-                lines = open(p, encoding="utf-8", errors="ignore").read().splitlines()
+                if os.path.getsize(p) > 20 * 1024 * 1024:
+                    continue
             except OSError:
                 continue
-            cur_vid, cur_title, cur_channel = "", "", ""
-            for ln in lines:
-                m = re.match(r"## \d+\.\s+(.*)", ln)
-                if m:
-                    cur_title = m.group(1)[:100]
-                mt = re.match(r"title:\s*(.+?)\s*$", ln)  # tree-layout frontmatter
-                if mt:
-                    cur_title = mt.group(1).strip().strip('"')[:100]
-                mc = re.match(r"channel:\s*(.+?)\s*$", ln)
-                if mc:
-                    cur_channel = mc.group(1).strip().strip('"')[:100]
-                m2 = re.search(r"Video ID:\s*(\S+)", ln) or re.search(r"video_id:\s*(\S+)", ln)
-                if m2:
-                    cur_vid = m2.group(1)
-                if _matches(ln, cur_title, cur_channel, cur_vid, must, must_not):
-                    hits.append({"file": os.path.relpath(p, base), "video_id": cur_vid,
-                                 "title": cur_title, "line": ln.strip()[:200]})
-                    if len(hits) >= limit:
-                        break
+            try:
+                f = open(p, encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            with f:
+                cur_vid, cur_title, cur_channel = "", "", ""
+                for ln in f:
+                    ln = ln.rstrip("\n")
+                    m = re.match(r"## \d+\.\s+(.*)", ln)
+                    if m:
+                        cur_title = m.group(1)[:100]
+                    mt = re.match(r"title:\s*(.+?)\s*$", ln)  # tree-layout frontmatter
+                    if mt:
+                        cur_title = mt.group(1).strip().strip('"')[:100]
+                    mc = re.match(r"channel:\s*(.+?)\s*$", ln)
+                    if mc:
+                        cur_channel = mc.group(1).strip().strip('"')[:100]
+                    m2 = re.search(r"Video ID:\s*(\S+)", ln) or re.search(r"video_id:\s*(\S+)", ln)
+                    if m2:
+                        cur_vid = m2.group(1)
+                    if _matches(ln, cur_title, cur_channel, cur_vid, must, must_not):
+                        hits.append({"file": os.path.relpath(p, base), "video_id": cur_vid,
+                                     "title": cur_title, "line": ln.strip()[:200]})
+                        if len(hits) >= limit:
+                            break
     if as_json:
         print(json.dumps(hits[:limit], indent=2, ensure_ascii=False))
     else:

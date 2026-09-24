@@ -36,12 +36,13 @@ def _filler_re(lang):
 def _collapse_repeats(body):
     """Collapse immediately repeated words/phrases ("world world", "you know you know") in O(n * DUP_MAX_WORDS)."""
     toks = body.split()
+    low = [t.lower() for t in toks]
     i, out = 0, []
     while i < len(toks):
         for n in range(min(DUP_MAX_WORDS, (len(toks) - i) // 2), 0, -1):
-            gram = [t.lower() for t in toks[i:i + n]]
+            gram = low[i:i + n]
             j = i + n
-            while j + n <= len(toks) and [t.lower() for t in toks[j:j + n]] == gram:
+            while j + n <= len(toks) and low[j:j + n] == gram:
                 j += n
             if j > i + n:  # at least one repeat
                 out.extend(toks[i:i + n])
