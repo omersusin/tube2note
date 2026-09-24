@@ -54,30 +54,58 @@ latest_tag() { # via GitHub API, needs curl
         | grep -m1 '"tag_name"' | cut -d'"' -f4
 }
 
+apk_for_arch() { # print asset download URL matching arch, or empty
+    tag="$1"
+    curl -fsSL "https://api.github.com/repos/${REPO}/releases/tags/${tag}" 2>/dev/null \
+        | grep '"browser_download_url"' | cut -d'"' -f4 | grep -i "\.apk$" | head -1
+}
+
+app_asset() { # print best desktop asset URL for OS/ARCH, or empty
+    tag="$1"
+    assets="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/tags/${tag}" 2>/dev/null \
+        | grep '"browser_download_url"' | cut -d'"' -f4)"
+    [ -z "$assets" ] && return 1
+    case "$OS" in
+        Linux) echo "$assets" | grep -iE "\.AppImage$|\.deb$" | head -1;;
+        Darwin) case "$MARCH" in arm64) echo "$assets" | grep -iE "aarch64.*\.dmg$|arm64.*\.dmg$" | head -1;; *) echo "$assets" | grep -iE "x64.*\.dmg$" | head -1;; esac;;
+    esac
+}
+
 install_app() {
     need curl
     TAG="$(latest_tag || true)"
     [ -z "$TAG" ] && die "cannot reach GitHub API (network? try CLI instead)"
     say "latest: $TAG"
     if [ -n "$IS_TERMUX" ]; then
-        say "On Android grab the APK:"
-        say "  https://github.com/${REPO}/releases/download/${TAG}/tube2note-${MARCH}.apk"
-        say "(asset name varies; pick your arch from the release page)"
+        URL="$(apk_for_arch "$TAG")"
+        [ -z "$URL" ] && die "no APK on release $TAG — see https://github.com/${REPO}/releases/tag/${TAG}"
+        OUT="${HOME}/storage/downloads/$(basename "$URL")"
+        mkdir -p "${HOME}/storage/downloads"
+        say "downloading $(basename "$URL") ..."
+        curl -fSL -o "$OUT" "$URL" || die "download failed"
+        say "saved to Downloads. Open it to install (allow unknown apps once)."
         return
     fi
-    case "$OS" in
-        Linux) ASSET="tube2note-${TAG}-linux-x86_64.AppImage";;
-        Darwin) ASSET="tube2note-${TAG}-macos.dmg";;
-        *) say "No desktop build for $OS — use the release page:"; say "  https://github.com/${REPO}/releases/tag/${TAG}"; return;;
-    esac
-    URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
-    say "fetching $ASSET ..."
-    curl -fSL -o "${HOME}/Downloads/${ASSET}" "$URL" && say "saved to ~/Downloads/${ASSET}" \
-        || say "asset not found (name differs?) — see https://github.com/${REPO}/releases/tag/${TAG}"
+    URL="$(app_asset "$TAG")"
+    [ -z "$URL" ] && die "no desktop build for $OS/$MARCH on $TAG — see https://github.com/${REPO}/releases/tag/${TAG}"
+    mkdir -p "${HOME}/Downloads"
+    say "downloading $(basename "$URL") ..."
+    curl -fSL -o "${HOME}/Downloads/$(basename "$URL")" "$URL" || die "download failed"
+    say "saved to ~/Downloads/$(basename "$URL")"
 }
 
 say "tube2note installer ($OS/$MARCH${IS_TERMUX:+ termux})"
-if [ -z "$IS_TERMUX" ] && ask "Install the desktop app instead of the CLI?" N; then
+if [ -n "$IS_TERMUX" ]; then
+    Q="Install the Android app (APK) or the CLI? [app/CLI]"
+else
+    Q="Install the desktop app instead of the CLI?"
+fi
+if [ -n "$NONINTERACTIVE" ] || [ ! -t 0 ]; then
+    install_cli
+elif [ -n "$IS_TERMUX" ]; then
+    printf '%s ' "$Q" >/dev/tty; read -r ans </dev/tty || ans=""
+    case "$ans" in [Aa]*) install_app;; *) install_cli;; esac
+elif ask "$Q" N; then
     install_app
 else
     install_cli
