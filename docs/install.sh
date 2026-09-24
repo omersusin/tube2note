@@ -100,13 +100,17 @@ if [ -n "$IS_TERMUX" ]; then
 else
     Q="Install the desktop app instead of the CLI?"
 fi
-if [ -n "$NONINTERACTIVE" ] || [ ! -t 0 ]; then
+if [ -n "$NONINTERACTIVE" ]; then
     install_cli
-elif [ -n "$IS_TERMUX" ]; then
-    printf '%s ' "$Q" >/dev/tty; read -r ans </dev/tty || ans=""
-    case "$ans" in [Aa]*) install_app;; *) install_cli;; esac
-elif ask "$Q" N; then
-    install_app
+elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    if [ -n "$IS_TERMUX" ]; then
+        printf '%s ' "$Q" >/dev/tty; read -r ans </dev/tty || ans=""
+        case "$ans" in [Aa]*) install_app;; *) install_cli;; esac
+    elif ask "$Q" N; then
+        install_app
+    else
+        install_cli
+    fi
 else
     install_cli
 fi
