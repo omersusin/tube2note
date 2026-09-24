@@ -100,7 +100,7 @@ def main(page: ft.Page):
     tr_bilingual = ft.TextField(label="Bilingual (e.g. tr, empty=off)",
                                 width=220, expand=True)
     gemini_key = ft.TextField(label="GEMINI_API_KEY (free)",
-                              helper_text="Get it at aistudio.google.com",
+                              hint_text="Get it at aistudio.google.com",
                               password=True,
                               can_reveal_password=True, expand=True)
     log = ft.Text("", selectable=True, font_family="monospace")
